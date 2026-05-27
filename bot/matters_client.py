@@ -1,8 +1,9 @@
 """Minimal Matters GraphQL client for repost-bot.
 
-Implements only what we need: emailLogin, directImageUpload (by URL),
+Implements only what we need: emailLogin, singleFileUpload (multipart),
 putDraft, and publishArticle.
 """
+import json
 import logging
 import mimetypes
 from typing import Any, Optional
@@ -119,35 +120,55 @@ class MattersClient:
 
     # ---- assets ----
 
-    def upload_image_by_url(
+    def upload_image_file(
         self,
-        url: str,
+        content: bytes,
+        filename: str,
+        mime: str,
         draft_id: str,
         *,
         asset_type: str = "embed",
-        mime: Optional[str] = None,
     ) -> dict:
-        """Tell Matters to fetch and store an image from `url`. Returns {id, path}.
+        """Upload image bytes to Matters via the GraphQL multipart spec.
 
-        `asset_type` is the Matters AssetType — use "embed" for body images,
-        "cover" for the article cover.
+        We use this instead of directImageUpload-by-URL because Cloudflare on
+        p-articles blocks Matters' server-side image fetcher, leaving 404 assets.
+
+        Returns the Asset dict {id, path, type}.
         """
         query = """
-        mutation DirectUpload($input: DirectImageUploadInput!) {
-          directImageUpload(input: $input) { id path type }
+        mutation Upload($input: SingleFileUploadInput!) {
+          singleFileUpload(input: $input) { id path type }
         }
         """
-        # Matters' API errors out with "mime needs to be specified" if we omit it.
-        # Guess from the URL extension; fall back to image/png since p-articles
-        # serves mostly PNGs.
-        if not mime:
-            guessed, _ = mimetypes.guess_type(urlparse(url).path)
-            mime = guessed or "image/png"
-        inp: dict[str, Any] = {
-            "type": asset_type,
-            "url": url,
-            "mime": mime,
-            "entityType": "draft",
-            "entityId": draft_id,
+        operations = json.dumps({
+            "query": query,
+            "variables": {
+                "input": {
+                    "type": asset_type,
+                    "file": None,
+                    "mime": mime,
+                    "entityType": "draft",
+                    "entityId": draft_id,
+                }
+            },
+        })
+        map_data = json.dumps({"0": ["variables.input.file"]})
+        # `files` triggers multipart in requests; do NOT include the json
+        # Content-Type header (requests will set the right boundary header).
+        files = {
+            "operations": (None, operations, "application/json"),
+            "map": (None, map_data, "application/json"),
+            "0": (filename, content, mime),
         }
-        return self._gql(query, {"input": inp})["directImageUpload"]
+        headers = {"User-Agent": USER_AGENT, "x-client-name": "p-articles-repost-bot"}
+        if self.token:
+            headers["x-access-token"] = self.token
+        resp = requests.post(self.api_url, files=files, headers=headers, timeout=120)
+        try:
+            body = resp.json()
+        except ValueError:
+            raise MattersError(f"Non-JSON upload response (status {resp.status_code}): {resp.text[:300]}")
+        if body.get("errors"):
+            raise MattersError(f"Upload GraphQL error: {body['errors']}")
+        return body["data"]["singleFileUpload"]

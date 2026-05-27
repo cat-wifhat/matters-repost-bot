@@ -17,6 +17,7 @@ from .scraper import (
     Article,
     ArticleRef,
     fetch_article,
+    fetch_image_bytes,
     list_recent_article_refs,
 )
 
@@ -85,7 +86,9 @@ def build_featured_html(article: Article, image_path_by_src: dict[str, str]) -> 
         matters_url = image_path_by_src.get(src)
         if not matters_url:
             continue
-        out.append(f'<figure><img src="{escape(matters_url)}"></figure>')
+        # Matters' editor expects <figure class="image"> — without the class
+        # the image is silently stripped on render.
+        out.append(f'<figure class="image"><img src="{escape(matters_url)}"></figure>')
     return "".join(out)
 
 
@@ -120,36 +123,48 @@ def repost_article(
     draft_id = client.create_empty_draft(title=title)
     log.info("  draft_id=%s", draft_id)
 
-    # Upload all images as 'embed' (so we get a usable URL for the body).
-    # Then upload the first featured image again as 'cover' so Matters' cover
-    # field gets populated — covers are processed differently and we don't want
-    # to rely on the cover-typed upload's path for body embedding.
+    # Download images via cloudscraper (Cloudflare-bypassing session), then
+    # upload bytes to Matters with the multipart spec. Matters' own URL-based
+    # fetcher gets 403'd by p-articles' Cloudflare, so the URL upload path
+    # silently produces 404 assets — we don't use it.
     all_image_srcs = list(article.featured_images)
     for src in _extract_body_image_srcs(article.body_html):
         if src not in all_image_srcs:
             all_image_srcs.append(src)
 
     image_path_by_src: dict[str, str] = {}
+    image_bytes_cache: dict[str, tuple[bytes, str]] = {}
     cover_asset_id: Optional[str] = None
+
     for src in all_image_srcs:
         try:
-            asset = client.upload_image_by_url(src, draft_id=draft_id, asset_type="embed")
-            log.info("  embed asset: id=%s path=%s", asset.get("id"), asset.get("path"))
+            content, mime = fetch_image_bytes(src)
+            image_bytes_cache[src] = (content, mime)
+            filename = src.rsplit("/", 1)[-1] or "image.png"
+            asset = client.upload_image_file(
+                content, filename, mime, draft_id=draft_id, asset_type="embed",
+            )
+            log.info("  embed asset: id=%s path=%s (%d bytes %s)",
+                     asset.get("id"), asset.get("path"), len(content), mime)
             path = asset.get("path") or ""
             if path:
                 image_path_by_src[src] = path
-        except MattersError as e:
+        except Exception as e:
             log.warning("  embed upload failed for %s: %s", src, e)
 
     if all_image_srcs:
+        first_src = all_image_srcs[0]
         try:
-            cover_asset = client.upload_image_by_url(
-                all_image_srcs[0], draft_id=draft_id, asset_type="cover",
+            content, mime = image_bytes_cache.get(first_src) or fetch_image_bytes(first_src)
+            filename = first_src.rsplit("/", 1)[-1] or "cover.png"
+            cover_asset = client.upload_image_file(
+                content, filename, mime, draft_id=draft_id, asset_type="cover",
             )
             cover_asset_id = cover_asset.get("id")
-            log.info("  cover asset: id=%s path=%s", cover_asset_id, cover_asset.get("path"))
-        except MattersError as e:
-            log.warning("  cover upload failed for %s: %s", all_image_srcs[0], e)
+            log.info("  cover asset: id=%s path=%s",
+                     cover_asset_id, cover_asset.get("path"))
+        except Exception as e:
+            log.warning("  cover upload failed for %s: %s", first_src, e)
 
     header_html = build_header_html(article)
     featured_html = build_featured_html(article, image_path_by_src)

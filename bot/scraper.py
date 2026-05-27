@@ -90,6 +90,15 @@ def list_recent_article_refs(session: Optional[requests.Session] = None) -> list
     return list(seen.values())
 
 
+def fetch_image_bytes(url: str, session: Optional[requests.Session] = None) -> tuple[bytes, str]:
+    """Download an image through the cloudscraper session and return (bytes, content_type)."""
+    s = session or _session()
+    resp = s.get(url, timeout=60)
+    resp.raise_for_status()
+    content_type = (resp.headers.get("Content-Type") or "image/png").split(";")[0].strip()
+    return resp.content, content_type
+
+
 def fetch_article(ref: ArticleRef, session: Optional[requests.Session] = None) -> Article:
     s = session or _session()
     resp = s.get(ref.url, timeout=30)
