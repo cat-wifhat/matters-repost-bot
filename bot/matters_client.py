@@ -161,7 +161,14 @@ class MattersClient:
             "map": (None, map_data, "application/json"),
             "0": (filename, content, mime),
         }
-        headers = {"User-Agent": USER_AGENT, "x-client-name": "p-articles-repost-bot"}
+        headers = {
+            "User-Agent": USER_AGENT,
+            "x-client-name": "p-articles-repost-bot",
+            # Apollo Server's CSRF protection rejects multipart requests unless
+            # one of these "preflight" headers is present.
+            "apollo-require-preflight": "true",
+            "x-apollo-operation-name": "Upload",
+        }
         if self.token:
             headers["x-access-token"] = self.token
         resp = requests.post(self.api_url, files=files, headers=headers, timeout=120)
