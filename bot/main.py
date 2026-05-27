@@ -79,16 +79,30 @@ def build_credit_html(article: Article) -> str:
     return "".join(lines)
 
 
-def build_featured_html(article: Article, image_path_by_src: dict[str, str]) -> str:
-    """Render the top-of-page gallery as figures using uploaded Matters URLs."""
+def build_featured_html(
+    article: Article,
+    image_path_by_src: dict[str, str],
+    asset_id_by_src: dict[str, str],
+) -> str:
+    """Render the top-of-page gallery as figures using uploaded Matters URLs.
+
+    The format mirrors what Matters' TipTap editor produces — <figure class="image">
+    with a self-closed <img> carrying data-asset-id, followed by an empty
+    figcaption. Omitting either piece has crashed putDraft with a
+    "Cannot read properties of undefined (reading 'firstChild')" error.
+    """
     out = []
     for src in article.featured_images:
         matters_url = image_path_by_src.get(src)
         if not matters_url:
             continue
-        # Matters' editor expects <figure class="image"> — without the class
-        # the image is silently stripped on render.
-        out.append(f'<figure class="image"><img src="{escape(matters_url)}"></figure>')
+        asset_id = asset_id_by_src.get(src, "")
+        out.append(
+            f'<figure class="image">'
+            f'<img src="{escape(matters_url)}" data-asset-id="{escape(asset_id)}" />'
+            f'<figcaption></figcaption>'
+            f'</figure>'
+        )
     return "".join(out)
 
 
@@ -133,6 +147,7 @@ def repost_article(
             all_image_srcs.append(src)
 
     image_path_by_src: dict[str, str] = {}
+    image_asset_id_by_src: dict[str, str] = {}
     image_bytes_cache: dict[str, tuple[bytes, str]] = {}
     cover_asset_id: Optional[str] = None
 
@@ -149,6 +164,7 @@ def repost_article(
             path = asset.get("path") or ""
             if path:
                 image_path_by_src[src] = path
+                image_asset_id_by_src[src] = asset.get("id") or ""
         except Exception as e:
             log.warning("  embed upload failed for %s: %s", src, e)
 
@@ -167,7 +183,7 @@ def repost_article(
             log.warning("  cover upload failed for %s: %s", first_src, e)
 
     header_html = build_header_html(article)
-    featured_html = build_featured_html(article, image_path_by_src)
+    featured_html = build_featured_html(article, image_path_by_src, image_asset_id_by_src)
     body_html = rewrite_body_images(article.body_html, image_path_by_src)
     credit_html = build_credit_html(article)
     full_content = header_html + featured_html + body_html + credit_html
