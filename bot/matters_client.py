@@ -4,7 +4,9 @@ Implements only what we need: emailLogin, directImageUpload (by URL),
 putDraft, and publishArticle.
 """
 import logging
+import mimetypes
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -135,12 +137,17 @@ class MattersClient:
           directImageUpload(input: $input) { id path type }
         }
         """
+        # Matters' API errors out with "mime needs to be specified" if we omit it.
+        # Guess from the URL extension; fall back to image/png since p-articles
+        # serves mostly PNGs.
+        if not mime:
+            guessed, _ = mimetypes.guess_type(urlparse(url).path)
+            mime = guessed or "image/png"
         inp: dict[str, Any] = {
             "type": asset_type,
             "url": url,
+            "mime": mime,
             "entityType": "draft",
             "entityId": draft_id,
         }
-        if mime:
-            inp["mime"] = mime
         return self._gql(query, {"input": inp})["directImageUpload"]

@@ -153,12 +153,17 @@ def repost_article(
     credit_html = build_credit_html(article)
     full_content = featured_html + body_html + credit_html
 
-    log.info("Updating draft with full content (%d chars)", len(full_content))
+    # Matters caps tags at 3 per article. p-articles routinely has 10+ — take
+    # the first 3 (source ordering is roughly by relevance).
+    tags = (article.tags or [])[:3]
+
+    log.info("Updating draft with full content (%d chars, %d tags)",
+             len(full_content), len(tags))
     result = client.update_draft(
         draft_id,
         title=title,
         content=full_content,
-        tags=article.tags or None,
+        tags=tags or None,
         cover_asset_id=cover_asset_id,
         license="arr",
     )
