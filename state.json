@@ -53,10 +53,28 @@
         }
       ],
       "ts": 1779879609
+    },
+    {
+      "failures": [],
+      "processed": [
+        {
+          "article_id": 5993,
+          "category": "critics",
+          "draft": {
+            "id": "RHJhZnQ6MTcxOTk0Nw",
+            "publishState": "unpublished",
+            "slug": "大濛-撥快時間的指針-穿透壓抑的迷霧",
+            "title": "《大濛》：撥快時間的指針 穿透壓抑的迷霧"
+          },
+          "title": "《大濛》：撥快時間的指針 穿透壓抑的迷霧",
+          "url": "https://p-articles.com/critics/5993.html"
+        }
+      ],
+      "ts": 1779879836
     }
   ],
   "last_seen_ids": {
-    "critics": 5992,
+    "critics": 5993,
     "heteroglossia": 5992,
     "issues": 5934,
     "nianhua": 1191,
