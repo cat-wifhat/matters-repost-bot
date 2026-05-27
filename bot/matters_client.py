@@ -141,13 +141,15 @@ class MattersClient:
           singleFileUpload(input: $input) { id path type }
         }
         """
+        # Note: SingleFileUploadInput has no `mime` field — Matters derives it
+        # from the multipart part's Content-Type. We still pass `mime` into the
+        # multipart part below.
         operations = json.dumps({
             "query": query,
             "variables": {
                 "input": {
                     "type": asset_type,
                     "file": None,
-                    "mime": mime,
                     "entityType": "draft",
                     "entityId": draft_id,
                 }
