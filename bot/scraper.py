@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urljoin
 
+import cloudscraper
 import requests
 from bs4 import BeautifulSoup, NavigableString, Tag
 
@@ -49,8 +50,15 @@ class Article:
 
 
 def _session() -> requests.Session:
-    s = requests.Session()
+    # p-articles.com sits behind Cloudflare and blocks plain requests from
+    # datacenter IPs (e.g. GitHub Actions runners). cloudscraper.create_scraper()
+    # returns a requests.Session subclass that solves Cloudflare's JS challenge
+    # and ships browser-like TLS/headers, which gets us through.
+    s = cloudscraper.create_scraper(
+        browser={"browser": "chrome", "platform": "darwin", "mobile": False},
+    )
     s.headers["User-Agent"] = USER_AGENT
+    s.headers["Accept-Language"] = "zh-TW,zh;q=0.9,en;q=0.8"
     return s
 
 
