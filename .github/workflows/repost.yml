@@ -1,0 +1,61 @@
+name: Repost p-articles to Matters
+
+on:
+  schedule:
+    # Every Monday & Thursday at 10:00 Hong Kong time (HKT = UTC+8 → 02:00 UTC).
+    # Cron fields: minute hour day-of-month month day-of-week (0=Sun, 1=Mon ... 4=Thu).
+    - cron: "0 2 * * 1,4"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (don't post to Matters)"
+        required: false
+        default: "false"
+      bootstrap:
+        description: "Bootstrap state only (record current max IDs, post nothing)"
+        required: false
+        default: "false"
+      publish:
+        description: "Publish immediately instead of leaving as drafts"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  repost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run repost bot
+        env:
+          MATTERS_EMAIL: ${{ secrets.MATTERS_EMAIL }}
+          MATTERS_PASSWORD: ${{ secrets.MATTERS_PASSWORD }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "${{ github.event.inputs.bootstrap }}" = "true" ]; then ARGS="$ARGS --bootstrap"; fi
+          if [ "${{ github.event.inputs.publish }}" = "true" ]; then ARGS="$ARGS --publish"; fi
+          python -m bot.main $ARGS
+
+      - name: Commit updated state
+        run: |
+          if git diff --quiet -- state.json; then
+            echo "state.json unchanged"
+            exit 0
+          fi
+          git config user.name "repost-bot"
+          git config user.email "repost-bot@users.noreply.github.com"
+          git add state.json
+          git commit -m "chore: update repost state ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+          git push
