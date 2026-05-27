@@ -59,27 +59,22 @@ def bootstrap_state(all_refs: list[ArticleRef]) -> dict[str, int]:
     return out
 
 
-def build_credit_html(article: Article) -> str:
-    """Trailing block: source link, author credit, and 虛詞無形 social links."""
-    lines = ["<hr>"]
-    lines.append(
-        f'<p>原文出處：<a href="{escape(article.url)}">'
-        f'虛詞 p-articles —— {escape(article.title)}</a></p>'
-    )
+def build_header_html(article: Article) -> str:
+    """Block placed at the very top of every repost, mirroring the manual format
+    @mattershklit uses: source-link line + author byline."""
+    parts = [
+        f'<p>（<a href="{escape(article.url)}">原文刊載於虛詞・無形</a>）</p>'
+    ]
     if article.author:
-        lines.append(f"<p>作者：{escape(article.author)}</p>")
-    meta_bits = []
-    if article.category_label:
-        meta_bits.append(f"分類：{escape(article.category_label)}")
-    if article.date:
-        meta_bits.append(f"原文日期：{escape(article.date)}")
-    if meta_bits:
-        lines.append(f"<p>{' ｜ '.join(meta_bits)}</p>")
+        parts.append(f"<p>文｜{escape(article.author)}</p>")
+    return "".join(parts)
 
-    lines.append("<p>虛詞・無形：</p><ul>")
-    for label, url in config.SOCIAL_LINKS.items():
-        lines.append(f'<li>{escape(label)}：<a href="{escape(url)}">{escape(url)}</a></li>')
-    lines.append("</ul>")
+
+def build_credit_html(article: Article) -> str:
+    """Trailing block: 4 plain link paragraphs, exact match of the manual format."""
+    lines = []
+    for label, url in config.CREDIT_LINKS:
+        lines.append(f'<p><a href="{escape(url)}">{escape(label)}</a></p>')
     return "".join(lines)
 
 
@@ -125,8 +120,10 @@ def repost_article(
     draft_id = client.create_empty_draft(title=title)
     log.info("  draft_id=%s", draft_id)
 
-    # Upload all images (featured + inline body images). Use the first featured
-    # image (if any) as the cover.
+    # Upload all images as 'embed' (so we get a usable URL for the body).
+    # Then upload the first featured image again as 'cover' so Matters' cover
+    # field gets populated — covers are processed differently and we don't want
+    # to rely on the cover-typed upload's path for body embedding.
     all_image_srcs = list(article.featured_images)
     for src in _extract_body_image_srcs(article.body_html):
         if src not in all_image_srcs:
@@ -134,24 +131,31 @@ def repost_article(
 
     image_path_by_src: dict[str, str] = {}
     cover_asset_id: Optional[str] = None
-    for idx, src in enumerate(all_image_srcs):
-        asset_type = "cover" if idx == 0 else "embed"
+    for src in all_image_srcs:
         try:
-            asset = client.upload_image_by_url(src, draft_id=draft_id, asset_type=asset_type)
+            asset = client.upload_image_by_url(src, draft_id=draft_id, asset_type="embed")
+            log.info("  embed asset: id=%s path=%s", asset.get("id"), asset.get("path"))
+            path = asset.get("path") or ""
+            if path:
+                image_path_by_src[src] = path
         except MattersError as e:
-            log.warning("  image upload failed for %s: %s", src, e)
-            continue
-        path = asset.get("path") or ""
-        if path:
-            image_path_by_src[src] = path
-            log.info("  uploaded image (%s) → %s", asset_type, path)
-        if idx == 0 and asset.get("id"):
-            cover_asset_id = asset["id"]
+            log.warning("  embed upload failed for %s: %s", src, e)
 
+    if all_image_srcs:
+        try:
+            cover_asset = client.upload_image_by_url(
+                all_image_srcs[0], draft_id=draft_id, asset_type="cover",
+            )
+            cover_asset_id = cover_asset.get("id")
+            log.info("  cover asset: id=%s path=%s", cover_asset_id, cover_asset.get("path"))
+        except MattersError as e:
+            log.warning("  cover upload failed for %s: %s", all_image_srcs[0], e)
+
+    header_html = build_header_html(article)
     featured_html = build_featured_html(article, image_path_by_src)
     body_html = rewrite_body_images(article.body_html, image_path_by_src)
     credit_html = build_credit_html(article)
-    full_content = featured_html + body_html + credit_html
+    full_content = header_html + featured_html + body_html + credit_html
 
     # Matters caps tags at 3 per article. p-articles routinely has 10+ — take
     # the first 3 (source ordering is roughly by relevance).

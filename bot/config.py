@@ -14,11 +14,14 @@ MAX_ARTICLES_PER_RUN = int(os.environ.get("MAX_ARTICLES_PER_RUN", "10"))
 
 STATE_PATH = os.environ.get("STATE_PATH", "state.json")
 
-SOCIAL_LINKS = {
-    "Facebook": "https://www.facebook.com/formless.particles/",
-    "Instagram": "https://www.instagram.com/formless.particles/",
-    "YouTube": "https://www.youtube.com/channel/UCxNpJJTKxGdbVOrxXN2fdZA",
-}
+# Credit links shown at the bottom of every repost. Order, labels, and URLs
+# all mirror the manual format used by @mattershklit on matters.town.
+CREDIT_LINKS = [
+    ("虛詞・無形網站",     "https://p-articles.com/"),
+    ("虛詞・無形Facebook", "https://www.facebook.com/formless.particles"),
+    ("虛詞・無形YouTube",  "https://www.youtube.com/@formless.particles"),
+    ("虛詞・無形Patreon",  "https://www.patreon.com/thehouseofhk_literature"),
+]
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
