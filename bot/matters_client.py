@@ -6,6 +6,7 @@ putDraft, and publishArticle.
 import json
 import logging
 import mimetypes
+import time
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -173,11 +174,28 @@ class MattersClient:
         }
         if self.token:
             headers["x-access-token"] = self.token
-        resp = requests.post(self.api_url, files=files, headers=headers, timeout=120)
-        try:
-            body = resp.json()
-        except ValueError:
-            raise MattersError(f"Non-JSON upload response (status {resp.status_code}): {resp.text[:300]}")
-        if body.get("errors"):
-            raise MattersError(f"Upload GraphQL error: {body['errors']}")
-        return body["data"]["singleFileUpload"]
+
+        # Retry on 5xx (Cloudflare/Matters origin gateway errors are flaky for
+        # multipart uploads). 3 attempts with backoff: 0s, 5s, 15s.
+        last_err: Optional[str] = None
+        for attempt, delay in enumerate([0, 5, 15]):
+            if delay:
+                time.sleep(delay)
+            try:
+                resp = requests.post(self.api_url, files=files, headers=headers, timeout=120)
+            except requests.RequestException as e:
+                last_err = f"network error: {e}"
+                log.info("  upload attempt %d/%d failed (%s), retrying", attempt + 1, 3, last_err)
+                continue
+            if 500 <= resp.status_code < 600:
+                last_err = f"status {resp.status_code}: {resp.text[:120]}"
+                log.info("  upload attempt %d/%d got %s, retrying", attempt + 1, 3, last_err)
+                continue
+            try:
+                body = resp.json()
+            except ValueError:
+                raise MattersError(f"Non-JSON upload response (status {resp.status_code}): {resp.text[:300]}")
+            if body.get("errors"):
+                raise MattersError(f"Upload GraphQL error: {body['errors']}")
+            return body["data"]["singleFileUpload"]
+        raise MattersError(f"Upload failed after 3 attempts; last error: {last_err}")
