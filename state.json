@@ -137,11 +137,29 @@
         }
       ],
       "ts": 1779882286
+    },
+    {
+      "failures": [],
+      "processed": [
+        {
+          "article_id": 5994,
+          "category": "heteroglossia",
+          "draft": {
+            "id": "RHJhZnQ6MTcyMDg2Mw",
+            "publishState": "unpublished",
+            "slug": "當錯覺為世界本相-詩以和解之名重生-錯覺與和解-新書分享會回顧",
+            "title": "當錯覺為世界本相，詩以和解之名重生——《錯覺與和解》新書分享會回顧"
+          },
+          "title": "當錯覺為世界本相，詩以和解之名重生——《錯覺與和解》新書分享會回顧",
+          "url": "https://p-articles.com/heteroglossia/5994.html"
+        }
+      ],
+      "ts": 1779948562
     }
   ],
   "last_seen_ids": {
     "critics": 5993,
-    "heteroglossia": 5992,
+    "heteroglossia": 5994,
     "issues": 5934,
     "nianhua": 1191,
     "one_take": 5976,
