@@ -1,13 +1,9 @@
 """Source registry — add new sources to _REGISTRY as they're implemented."""
 from .base import Article, ArticleRef, Source, fetch_image_bytes, make_scraper_session
-from .foodthink import FoodthinkSource
-from .newsmarket import NewsmarketSource
 from .p_articles import PArticlesSource
 
 _REGISTRY: dict[str, type[Source]] = {
     PArticlesSource.name: PArticlesSource,
-    NewsmarketSource.name: NewsmarketSource,
-    FoodthinkSource.name: FoodthinkSource,
 }
 
 
