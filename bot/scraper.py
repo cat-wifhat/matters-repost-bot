@@ -113,7 +113,21 @@ def fetch_article(ref: ArticleRef, session: Optional[requests.Session] = None) -
     meta_h4 = soup.select_one(".detail_title_02 h4")
     category_label, author, date = _parse_meta(meta_h4)
 
-    tags = [_text(a) for a in soup.select(".detail_title_02 p.tags a") if _text(a)]
+    # p-articles is inconsistent: some articles have one tag per <a>, others
+    # cram multiple tags into a single <a> separated by spaces and `#`
+    # (e.g. "劉再復 #訃聞 #離世"). Matters rejects long/whitespace/#-containing
+    # tags as "bad tag format", so we split on whitespace and `#` and dedupe.
+    tags: list[str] = []
+    seen: set[str] = set()
+    for a in soup.select(".detail_title_02 p.tags a"):
+        raw = _text(a)
+        if not raw:
+            continue
+        for piece in re.split(r"[#\s]+", raw):
+            piece = piece.strip()
+            if piece and piece not in seen:
+                seen.add(piece)
+                tags.append(piece)
 
     featured_images = []
     for img in soup.select("#image-gallery img"):
