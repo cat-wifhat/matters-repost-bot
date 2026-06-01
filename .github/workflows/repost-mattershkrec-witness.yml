@@ -1,0 +1,69 @@
+name: Repost thewitnesshk → @mattershkrec
+
+on:
+  schedule:
+    # Tue & Fri 06:00 Hong Kong time (UTC+8). HKT 06:00 = UTC 22:00 previous day.
+    # → Mon 22:00 UTC = Tue 06:00 HKT; Thu 22:00 UTC = Fri 06:00 HKT.
+    - cron: "0 22 * * 1,4"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (don't post to Matters)"
+        required: false
+        default: "false"
+      bootstrap:
+        description: "Bootstrap state only (record current refs, post nothing)"
+        required: false
+        default: "false"
+      publish:
+        description: "Publish immediately instead of leaving as drafts"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+env:
+  SOURCE: thewitnesshk
+  STATE_FILE: state/mattershkrec_witness.json
+
+jobs:
+  repost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run repost bot
+        env:
+          MATTERS_EMAIL: ${{ secrets.MATTERSHKREC_EMAIL }}
+          MATTERS_PASSWORD: ${{ secrets.MATTERSHKREC_PASSWORD }}
+        run: |
+          ARGS="--source $SOURCE --state $STATE_FILE"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "${{ github.event.inputs.bootstrap }}" = "true" ]; then ARGS="$ARGS --bootstrap"; fi
+          if [ "${{ github.event.inputs.publish }}" = "true" ]; then ARGS="$ARGS --publish"; fi
+          python -m bot.main $ARGS
+
+      - name: Commit updated state
+        run: |
+          if [ ! -f "$STATE_FILE" ]; then
+            echo "$STATE_FILE was not produced; nothing to commit"
+            exit 0
+          fi
+          git add "$STATE_FILE"
+          if git diff --cached --quiet -- "$STATE_FILE"; then
+            echo "$STATE_FILE unchanged"
+            exit 0
+          fi
+          git config user.name "repost-bot"
+          git config user.email "repost-bot@users.noreply.github.com"
+          git commit -m "chore: update $SOURCE state ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+          git push

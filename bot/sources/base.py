@@ -65,6 +65,20 @@ def make_scraper_session(use_cloudscraper: bool = True) -> requests.Session:
     return s
 
 
+def make_curl_cffi_session(impersonate: str = "safari17_0"):
+    """Build a curl_cffi session that mimics a real browser's TLS fingerprint.
+
+    Used by sources whose firewall blocks plain requests / cloudscraper /
+    chrome-fingerprint sessions but lets safari/firefox through. curl_cffi
+    sets its own UA/headers via the impersonation; we don't override them.
+
+    Returns a curl_cffi.requests.Session — quacks like requests.Session
+    (supports .get/.post/.headers/.content/.raise_for_status()).
+    """
+    from curl_cffi import requests as cffi  # local import: optional dep
+    return cffi.Session(impersonate=impersonate)
+
+
 def fetch_image_bytes(
     url: str,
     session: Optional[requests.Session] = None,
@@ -90,12 +104,18 @@ class Source(ABC):
     use_cloudscraper: bool = True
 
     def __init__(self) -> None:
-        self._session: Optional[requests.Session] = None
+        self._session = None
 
-    def session(self) -> requests.Session:
+    def session(self):
+        """Return the source's HTTP session (requests-compatible)."""
         if self._session is None:
-            self._session = make_scraper_session(use_cloudscraper=self.use_cloudscraper)
+            self._session = self._make_session()
         return self._session
+
+    def _make_session(self):
+        """Build the source's HTTP session. Override for custom transport
+        (e.g. curl_cffi for sites that block standard fingerprints)."""
+        return make_scraper_session(use_cloudscraper=self.use_cloudscraper)
 
     @abstractmethod
     def list_recent_article_refs(self) -> list[ArticleRef]:
