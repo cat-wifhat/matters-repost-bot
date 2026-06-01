@@ -85,6 +85,9 @@ class TheCollectiveHkSource(Source):
         title = d.get("title", {}).get("rendered", "").strip()
         if not title:
             raise ValueError(f"No title for post {ref.article_id}")
+        # @mattershkrec receives drafts from multiple sources — prefix the
+        # source label so editors can tell them apart in the drafts list.
+        title = f"【集誌社】{title}"
         date = (d.get("date") or "")[:10]
         content_html = d.get("content", {}).get("rendered", "")
 
