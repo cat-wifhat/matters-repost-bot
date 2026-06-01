@@ -66,4 +66,15 @@ jobs:
           git config user.name "repost-bot"
           git config user.email "repost-bot@users.noreply.github.com"
           git commit -m "chore: update $SOURCE state ($(date -u +'%Y-%m-%d %H:%M UTC'))"
-          git push
+          # Retry on parallel-workflow push race: pull --rebase then re-push.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push attempt $attempt rejected; rebasing onto latest origin/main"
+            git pull --rebase origin main
+            sleep $((attempt * 2))
+          done
+          echo "push failed after 3 attempts"
+          exit 1
