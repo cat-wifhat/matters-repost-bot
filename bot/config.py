@@ -1,9 +1,14 @@
-import os
+"""Generic config — env vars and shared constants.
 
-SOURCE_BASE = "https://p-articles.com"
+Per-source things (credit links, social URLs, header format) live inside each
+bot/sources/<name>.py module, not here.
+"""
+import os
 
 MATTERS_API = "https://server.matters.news/graphql"
 
+# Credentials are mapped per workflow via repository Secrets, but the bot always
+# reads them from these two env var names (workflows do the renaming).
 MATTERS_EMAIL = os.environ.get("MATTERS_EMAIL", "")
 MATTERS_PASSWORD = os.environ.get("MATTERS_PASSWORD", "")
 
@@ -11,17 +16,6 @@ DRY_RUN = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
 PUBLISH = os.environ.get("PUBLISH", "").lower() in ("1", "true", "yes")
 
 MAX_ARTICLES_PER_RUN = int(os.environ.get("MAX_ARTICLES_PER_RUN", "10"))
-
-STATE_PATH = os.environ.get("STATE_PATH", "state.json")
-
-# Credit links shown at the bottom of every repost. Order, labels, and URLs
-# all mirror the manual format used by @mattershklit on matters.town.
-CREDIT_LINKS = [
-    ("虛詞・無形網站",     "https://p-articles.com/"),
-    ("虛詞・無形Facebook", "https://www.facebook.com/formless.particles"),
-    ("虛詞・無形YouTube",  "https://www.youtube.com/@formless.particles"),
-    ("虛詞・無形Patreon",  "https://www.patreon.com/thehouseofhk_literature"),
-]
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "

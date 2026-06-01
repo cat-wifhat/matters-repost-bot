@@ -1,12 +1,10 @@
-name: Repost p-articles to Matters
+name: Repost p-articles → @mattershklit
 
 on:
   schedule:
-    # Every Monday & Thursday at 06:00 Hong Kong time (HKT = UTC+8).
-    # HKT 06:00 = UTC 22:00 the previous day → Sun 22:00 UTC = Mon 06:00 HKT,
-    # Wed 22:00 UTC = Thu 06:00 HKT. Off-peak UTC reduces GHA scheduler delay
-    # (top-of-hour UTC slots are heavily oversubscribed).
-    # Cron fields: minute hour day-of-month month day-of-week (0=Sun, 1=Mon ... 4=Thu).
+    # Mon & Thu 06:00 Hong Kong time (UTC+8). HKT 06:00 = UTC 22:00 previous day.
+    # → Sun 22:00 UTC = Mon 06:00 HKT; Wed 22:00 UTC = Thu 06:00 HKT.
+    # Off-peak UTC reduces GHA scheduler delay (top-of-hour UTC is heavily oversubscribed).
     - cron: "0 22 * * 0,3"
   workflow_dispatch:
     inputs:
@@ -15,7 +13,7 @@ on:
         required: false
         default: "false"
       bootstrap:
-        description: "Bootstrap state only (record current max IDs, post nothing)"
+        description: "Bootstrap state only (record current refs, post nothing)"
         required: false
         default: "false"
       publish:
@@ -25,6 +23,10 @@ on:
 
 permissions:
   contents: write
+
+env:
+  SOURCE: p_articles
+  STATE_FILE: state/mattershklit.json
 
 jobs:
   repost:
@@ -45,7 +47,7 @@ jobs:
           MATTERS_EMAIL: ${{ secrets.MATTERS_EMAIL }}
           MATTERS_PASSWORD: ${{ secrets.MATTERS_PASSWORD }}
         run: |
-          ARGS=""
+          ARGS="--source $SOURCE --state $STATE_FILE"
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ "${{ github.event.inputs.bootstrap }}" = "true" ]; then ARGS="$ARGS --bootstrap"; fi
           if [ "${{ github.event.inputs.publish }}" = "true" ]; then ARGS="$ARGS --publish"; fi
@@ -53,17 +55,17 @@ jobs:
 
       - name: Commit updated state
         run: |
-          if [ ! -f state.json ]; then
-            echo "state.json was not produced; nothing to commit"
+          if [ ! -f "$STATE_FILE" ]; then
+            echo "$STATE_FILE was not produced; nothing to commit"
             exit 0
           fi
-          git add state.json
-          # --cached works for both new and modified files; plain `git diff` misses new files.
-          if git diff --cached --quiet -- state.json; then
-            echo "state.json unchanged"
+          git add "$STATE_FILE"
+          # --cached catches both new and modified files; plain `git diff` misses new files.
+          if git diff --cached --quiet -- "$STATE_FILE"; then
+            echo "$STATE_FILE unchanged"
             exit 0
           fi
           git config user.name "repost-bot"
           git config user.email "repost-bot@users.noreply.github.com"
-          git commit -m "chore: update repost state ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+          git commit -m "chore: update $SOURCE state ($(date -u +'%Y-%m-%d %H:%M UTC'))"
           git push
