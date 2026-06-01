@@ -2,9 +2,12 @@ name: Repost p-articles to Matters
 
 on:
   schedule:
-    # Every Monday & Thursday at 10:00 Hong Kong time (HKT = UTC+8 → 02:00 UTC).
+    # Every Monday & Thursday at 06:00 Hong Kong time (HKT = UTC+8).
+    # HKT 06:00 = UTC 22:00 the previous day → Sun 22:00 UTC = Mon 06:00 HKT,
+    # Wed 22:00 UTC = Thu 06:00 HKT. Off-peak UTC reduces GHA scheduler delay
+    # (top-of-hour UTC slots are heavily oversubscribed).
     # Cron fields: minute hour day-of-month month day-of-week (0=Sun, 1=Mon ... 4=Thu).
-    - cron: "0 2 * * 1,4"
+    - cron: "0 22 * * 0,3"
   workflow_dispatch:
     inputs:
       dry_run:
