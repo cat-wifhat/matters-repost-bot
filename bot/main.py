@@ -162,7 +162,13 @@ def repost_article(
 
     if publish:
         log.info("Publishing draft %s", draft_id)
-        result = client.publish_draft(draft_id)
+        try:
+            result = client.publish_draft(draft_id)
+        except MattersError as e:
+            # Don't fail the whole article on publish error — the draft is
+            # already populated; leave it for the user to publish manually.
+            # Matters' rate limit ("操作過於頻繁") most often shows up here.
+            log.warning("Publish failed (leaving as draft): %s", e)
 
     return result
 
@@ -216,7 +222,8 @@ def run(
 
     processed: list[dict] = []
     failures: list[dict] = []
-    for ref in new_refs:
+    for i, ref in enumerate(new_refs):
+        is_last = (i == len(new_refs) - 1)
         try:
             log.info("---- %s %s ----", source_name, ref.article_id)
             article = source.fetch_article(ref)
@@ -230,7 +237,13 @@ def run(
             # Advance state only on success so failures get retried next run.
             source.advance_state(state, article)
             save_state(state_path, state)
-            time.sleep(2)
+            # Pace successive publishes — Matters caps at 2 per 12 min.
+            if publish and not dry_run and not is_last:
+                wait_min = config.PUBLISH_INTERVAL_MINUTES
+                log.info("Sleeping %d min before next publish (Matters rate limit)", wait_min)
+                time.sleep(wait_min * 60)
+            elif not is_last:
+                time.sleep(2)
         except Exception as e:
             log.exception("Failed processing %s: %s", ref.article_id, e)
             failures.append({

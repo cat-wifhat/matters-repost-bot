@@ -30,7 +30,8 @@ env:
 jobs:
   repost:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 6 hours — accommodates auto-publish runs that sleep 30 min between articles.
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
