@@ -235,8 +235,10 @@ def run(
                 "draft": result,
             })
             # Advance state only on success so failures get retried next run.
-            source.advance_state(state, article)
-            save_state(state_path, state)
+            # Skip in dry-run: state should reflect actual reposts only.
+            if not dry_run:
+                source.advance_state(state, article)
+                save_state(state_path, state)
             # Pace successive publishes — Matters caps at 2 per 12 min.
             if publish and not dry_run and not is_last:
                 wait_min = config.PUBLISH_INTERVAL_MINUTES
