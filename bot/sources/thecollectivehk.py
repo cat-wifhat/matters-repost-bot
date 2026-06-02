@@ -17,7 +17,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
-from .base import Article, ArticleRef, Source, make_curl_cffi_session
+from .base import Article, ArticleRef, Source, fetch_json, make_curl_cffi_session
 
 log = logging.getLogger(__name__)
 
@@ -54,16 +54,15 @@ class TheCollectiveHkSource(Source):
     # ----- listing & fetching -----
 
     def list_recent_article_refs(self) -> list[ArticleRef]:
-        resp = self.session().get(
+        posts = fetch_json(
+            self.session(),
             f"{API}/posts",
             params={"categories": IN_DEPTH_CATEGORY_ID,
                     "per_page": 20,
                     "_fields": "id,date,link"},
-            timeout=30,
         )
-        resp.raise_for_status()
         out: list[ArticleRef] = []
-        for p in resp.json():
+        for p in posts:
             pid = int(p["id"])
             out.append(ArticleRef(
                 source=self.name,
@@ -74,13 +73,11 @@ class TheCollectiveHkSource(Source):
         return out
 
     def fetch_article(self, ref: ArticleRef) -> Article:
-        resp = self.session().get(
+        d = fetch_json(
+            self.session(),
             f"{API}/posts/{ref.extra['wp_id']}",
             params={"_embed": "1"},
-            timeout=30,
         )
-        resp.raise_for_status()
-        d = resp.json()
 
         title = d.get("title", {}).get("rendered", "").strip()
         if not title:

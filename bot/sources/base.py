@@ -10,6 +10,7 @@ The orchestrator (bot/main.py) is source-agnostic and just calls these methods.
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -93,6 +94,54 @@ def fetch_image_bytes(
     resp.raise_for_status()
     content_type = (resp.headers.get("Content-Type") or "image/png").split(";")[0].strip()
     return resp.content, content_type
+
+
+def fetch_json(
+    session,
+    url: str,
+    *,
+    params: Optional[dict] = None,
+    timeout: int = 30,
+    attempts: int = 3,
+    backoff: tuple[int, ...] = (0, 3, 8),
+):
+    """GET `url` and parse JSON, retrying transient failures.
+
+    WordPress/WAF endpoints behind Cloudflare occasionally return an empty or
+    non-JSON 200 body to datacenter IPs (e.g. GitHub Actions runners). A single
+    such blip used to crash the whole run at `resp.json()`. We retry on:
+    network errors, 5xx, and empty/non-JSON bodies. 4xx is surfaced immediately
+    (not transient). Backoff between attempts: 0s, 3s, 8s.
+    """
+    last_err: Optional[str] = None
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(backoff[min(attempt, len(backoff) - 1)])
+        try:
+            resp = session.get(url, params=params, timeout=timeout)
+        except Exception as e:  # noqa: BLE001 — network layer can raise various
+            last_err = f"network error: {e}"
+            log.info("  fetch_json attempt %d/%d failed (%s)", attempt + 1, attempts, last_err)
+            continue
+        status = resp.status_code
+        if status >= 400 and status < 500:
+            resp.raise_for_status()  # client error — not transient, surface it
+        if status >= 500:
+            last_err = f"status {status}"
+            log.info("  fetch_json attempt %d/%d got %s, retrying", attempt + 1, attempts, last_err)
+            continue
+        body = resp.text or ""
+        if not body.strip():
+            last_err = f"empty body (status {status})"
+            log.info("  fetch_json attempt %d/%d got empty body, retrying", attempt + 1, attempts)
+            continue
+        try:
+            return resp.json()
+        except ValueError:
+            last_err = f"non-JSON body (status {status}): {body[:120]!r}"
+            log.info("  fetch_json attempt %d/%d got non-JSON, retrying", attempt + 1, attempts)
+            continue
+    raise RuntimeError(f"fetch_json failed after {attempts} attempts for {url}: {last_err}")
 
 
 class Source(ABC):
