@@ -1,31 +1,48 @@
 """Source: thecollectivehk.com (集誌社).
 
-WordPress site. Filters to the 深度 section (category id 5, slug=in-depth)
-per @mattershkrec's editorial preference — same destination Matters account
-as 法庭線, just a separate scheduling/state stream.
+WordPress site. Mirrors the 深度 (in-depth) section per @mattershkrec's
+editorial preference — same destination Matters account as 法庭線, just a
+separate scheduling/state stream.
 
-WAF behaviour mirrors 法庭線: Chrome TLS from datacenters returns 403, so
-we use curl_cffi safari17_0 impersonation. Body cleanup mirrors the witness
-source — lazy images, iframe embeds, WP block clutter.
+Fetch strategy — RSS feed, not the REST API. This host runs SiteGround's
+"Security Optimizer", which serves an `sgcaptcha` interstitial to datacenter
+IPs (GitHub Actions runners) hitting `/wp-json/` — the old REST path, so every
+scheduled run failed at listing. The category RSS feed
+(`/category/in-depth/feed/`) is treated as ordinary crawlable content and isn't
+challenged, and it already carries the FULL post body (`content:encoded`) plus
+title/link/author/date/tags — so one feed GET replaces the old list + per-post
+REST fetches entirely. curl_cffi safari17_0 impersonation is kept as belt-and-
+braces. Body cleanup is unchanged. Note: the feed exposes the 10 most recent
+in-depth posts; 深度 publishes far fewer than 10 between runs, and the
+orchestrator caps each run at 10 anyway, so the window is not a constraint.
 """
 from __future__ import annotations
 
 import logging
 import re
+from email.utils import parsedate_to_datetime
 from html import escape
 from urllib.parse import urljoin
+from xml.etree import ElementTree as ET
 
 from bs4 import BeautifulSoup, Tag
 
-from .base import Article, ArticleRef, Source, fetch_json, make_curl_cffi_session
+from .base import Article, ArticleRef, Source, fetch_text, make_curl_cffi_session
 
 log = logging.getLogger(__name__)
 
 SITE = "https://thecollectivehk.com"
-API = f"{SITE}/wp-json/wp/v2"
+FEED = f"{SITE}/category/in-depth/feed/"
 
-# 深度 — the section we mirror.
-IN_DEPTH_CATEGORY_ID = 5
+# 深度 — the section we mirror. It's the feed's own category, so it shows up on
+# every item's <category> list; drop it when collecting tags.
+SECTION_LABEL = "深度"
+
+# RSS module namespaces used by WordPress feeds.
+RSS_NS = {
+    "content": "http://purl.org/rss/1.0/modules/content/",
+    "dc": "http://purl.org/dc/elements/1.1/",
+}
 
 CREDIT_LINKS = [
     ("集誌社官網",      "https://thecollectivehk.com/"),
@@ -48,77 +65,66 @@ ALLOWED_TAGS = {
 class TheCollectiveHkSource(Source):
     name = "thecollectivehk"
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Cache of feed items keyed by wp_id, populated by list_recent_article_refs
+        # so fetch_article doesn't re-request — the feed already has full bodies.
+        self._items_by_id: dict[int, dict] = {}
+
     def _make_session(self):
         return make_curl_cffi_session(impersonate="safari17_0")
 
     # ----- listing & fetching -----
 
+    def _load_feed(self) -> dict[int, dict]:
+        xml = fetch_text(self.session(), FEED)
+        items = _parse_feed(xml)
+        self._items_by_id = {it["wp_id"]: it for it in items}
+        return self._items_by_id
+
     def list_recent_article_refs(self) -> list[ArticleRef]:
-        posts = fetch_json(
-            self.session(),
-            f"{API}/posts",
-            params={"categories": IN_DEPTH_CATEGORY_ID,
-                    "per_page": 20,
-                    "_fields": "id,date,link"},
-        )
+        items = self._load_feed()
         out: list[ArticleRef] = []
-        for p in posts:
-            pid = int(p["id"])
+        for it in items.values():
             out.append(ArticleRef(
                 source=self.name,
-                article_id=str(pid),
-                url=p["link"],
-                extra={"wp_id": pid, "date": (p.get("date") or "")[:10]},
+                article_id=str(it["wp_id"]),
+                url=it["link"],
+                extra={"wp_id": it["wp_id"], "date": it["date"]},
             ))
         return out
 
     def fetch_article(self, ref: ArticleRef) -> Article:
-        d = fetch_json(
-            self.session(),
-            f"{API}/posts/{ref.extra['wp_id']}",
-            params={"_embed": "1"},
-        )
+        wp_id = ref.extra["wp_id"]
+        it = self._items_by_id.get(wp_id)
+        if it is None:
+            # Feed shifted between list and fetch (or a fresh instance) — reload.
+            it = self._load_feed().get(wp_id)
+        if it is None:
+            raise ValueError(f"post {ref.article_id} not present in feed")
 
-        title = d.get("title", {}).get("rendered", "").strip()
+        title = it["title"]
         if not title:
             raise ValueError(f"No title for post {ref.article_id}")
         # @mattershkrec receives drafts from multiple sources — prefix the
         # source label so editors can tell them apart in the drafts list.
         title = f"【集誌社】{title}"
-        date = (d.get("date") or "")[:10]
-        content_html = d.get("content", {}).get("rendered", "")
 
-        embedded = d.get("_embedded", {}) or {}
-        authors = embedded.get("author", []) or []
-        author = (authors[0].get("name") if authors else "") or ""
+        body_html = _clean_body(it["content"])
 
-        featured_images: list[str] = []
-        for m in embedded.get("wp:featuredmedia", []) or []:
-            src = (m or {}).get("source_url")
-            if src:
-                featured_images.append(src)
-
-        tags: list[str] = []
-        for term_group in embedded.get("wp:term", []) or []:
-            for term in term_group or []:
-                if term.get("taxonomy") == "post_tag":
-                    name = term.get("name")
-                    if name and name not in tags:
-                        tags.append(name)
-
-        body_html = _clean_body(content_html)
-
+        # The feed has no featured-media field; the lead image is the first one
+        # in the body, which the orchestrator already uses as the cover.
         return Article(
             source=self.name,
             article_id=ref.article_id,
             url=ref.url,
             title=title,
-            author=author,
-            date=date,
-            tags=tags,
-            featured_images=featured_images,
+            author=it["author"],
+            date=it["date"],
+            tags=it["tags"],
+            featured_images=[],
             body_html=body_html,
-            extra={"wp_id": ref.extra["wp_id"]},
+            extra={"wp_id": wp_id},
         )
 
     # ----- state tracking -----
@@ -143,6 +149,59 @@ class TheCollectiveHkSource(Source):
             f'<p><a href="{escape(url)}">{escape(label)}</a></p>'
             for label, url in CREDIT_LINKS
         )
+
+
+# ----- RSS feed parsing -----
+
+def _rss_date(pubdate: str) -> str:
+    """RFC-822 pubDate (e.g. 'Thu, 04 Jun 2026 18:44:52 +0000') -> 'YYYY-MM-DD'."""
+    if not pubdate:
+        return ""
+    try:
+        dt = parsedate_to_datetime(pubdate)
+        return dt.date().isoformat() if dt else ""
+    except (TypeError, ValueError):
+        return ""
+
+
+def _parse_feed(xml: str) -> list[dict]:
+    """Parse a WordPress category RSS feed into a list of post dicts.
+
+    Each dict: {wp_id, title, link, author, date, tags, content}. Items whose
+    guid carries no numeric post id are skipped (we key state on wp_id).
+    """
+    root = ET.fromstring(xml)
+    out: list[dict] = []
+    for item in root.findall("./channel/item"):
+        guid = (item.findtext("guid") or "").strip()
+        m = re.search(r"[?&]p=(\d+)", guid)
+        if not m:
+            continue
+        wp_id = int(m.group(1))
+
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        author = (item.findtext("dc:creator", default="", namespaces=RSS_NS) or "").strip()
+        date = _rss_date(item.findtext("pubDate") or "")
+
+        tags: list[str] = []
+        for c in item.findall("category"):
+            name = (c.text or "").strip()
+            if name and name != SECTION_LABEL and name not in tags:
+                tags.append(name)
+
+        content = item.findtext("content:encoded", default="", namespaces=RSS_NS) or ""
+
+        out.append({
+            "wp_id": wp_id,
+            "title": title,
+            "link": link,
+            "author": author,
+            "date": date,
+            "tags": tags,
+            "content": content,
+        })
+    return out
 
 
 # ----- body cleaner (same shape as thewitnesshk) -----

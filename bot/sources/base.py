@@ -144,6 +144,54 @@ def fetch_json(
     raise RuntimeError(f"fetch_json failed after {attempts} attempts for {url}: {last_err}")
 
 
+def fetch_text(
+    session,
+    url: str,
+    *,
+    params: Optional[dict] = None,
+    timeout: int = 30,
+    attempts: int = 3,
+    backoff: tuple[int, ...] = (0, 3, 8),
+) -> str:
+    """GET `url` and return the response body text, retrying transient failures.
+
+    The text-returning counterpart to `fetch_json`, for RSS/XML endpoints. Same
+    retry policy — network errors, 5xx, empty bodies — plus one extra case: a
+    SiteGround "Security Optimizer" captcha interstitial (body contains
+    `sgcaptcha`). That host serves the challenge intermittently to datacenter
+    IPs (e.g. GitHub Actions runners) in place of the real content; retrying
+    sometimes gets through. 4xx is surfaced immediately (not transient).
+    """
+    last_err: Optional[str] = None
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(backoff[min(attempt, len(backoff) - 1)])
+        try:
+            resp = session.get(url, params=params, timeout=timeout)
+        except Exception as e:  # noqa: BLE001 — network layer can raise various
+            last_err = f"network error: {e}"
+            log.info("  fetch_text attempt %d/%d failed (%s)", attempt + 1, attempts, last_err)
+            continue
+        status = resp.status_code
+        if 400 <= status < 500:
+            resp.raise_for_status()  # client error — not transient, surface it
+        if status >= 500:
+            last_err = f"status {status}"
+            log.info("  fetch_text attempt %d/%d got %s, retrying", attempt + 1, attempts, last_err)
+            continue
+        body = resp.text or ""
+        if not body.strip():
+            last_err = f"empty body (status {status})"
+            log.info("  fetch_text attempt %d/%d got empty body, retrying", attempt + 1, attempts)
+            continue
+        if "sgcaptcha" in body:
+            last_err = "captcha interstitial (sgcaptcha)"
+            log.info("  fetch_text attempt %d/%d got captcha page, retrying", attempt + 1, attempts)
+            continue
+        return body
+    raise RuntimeError(f"fetch_text failed after {attempts} attempts for {url}: {last_err}")
+
+
 class Source(ABC):
     """A repost source — knows how to list, parse, track, and frame articles."""
 
