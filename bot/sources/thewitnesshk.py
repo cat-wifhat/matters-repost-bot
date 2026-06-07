@@ -1,7 +1,9 @@
 """Source: thewitnesshk.com (法庭線).
 
-WordPress site with REST API enabled. Filters to the 焦點 (category id 28)
-section per @mattershkrec's editorial preference.
+WordPress site with REST API enabled. Filters to the 專題 / "feature" section
+(category id 8, the /feature/ archive) per @mattershkrec's editorial preference.
+Was the 焦點 section (id 28) but that carried too much breaking news; 專題 is
+the in-depth/feature coverage we actually want to mirror.
 
 The site's WAF returns hard 403s to Chrome-fingerprint sessions from
 datacenter IP ranges, so we use curl_cffi's safari17_0 impersonation instead
@@ -30,8 +32,8 @@ log = logging.getLogger(__name__)
 SITE = "https://thewitnesshk.com"
 API = f"{SITE}/wp-json/wp/v2"
 
-# 焦點 — the section we mirror.
-FOCUS_CATEGORY_ID = 28
+# 專題 (feature) — the section we mirror. The /feature/ archive on the site.
+FEATURE_CATEGORY_ID = 8
 
 CREDIT_LINKS = [
     ("法庭線官網",      "https://thewitnesshk.com/"),
@@ -65,7 +67,7 @@ class TheWitnessHkSource(Source):
         posts = fetch_json(
             self.session(),
             f"{API}/posts",
-            params={"categories": FOCUS_CATEGORY_ID,
+            params={"categories": FEATURE_CATEGORY_ID,
                     "per_page": 20,
                     "_fields": "id,date,link"},
         )
