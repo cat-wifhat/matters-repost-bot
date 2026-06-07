@@ -222,11 +222,30 @@ def run(
 
     processed: list[dict] = []
     failures: list[dict] = []
+    skipped: list[dict] = []
     for i, ref in enumerate(new_refs):
         is_last = (i == len(new_refs) - 1)
         try:
             log.info("---- %s %s ----", source_name, ref.article_id)
             article = source.fetch_article(ref)
+
+            # Content-policy filter (e.g. drop the source's own third-party
+            # reposts). Mark as seen so we don't re-fetch it every run, but
+            # never advance state in dry-run.
+            skip_reason = source.repost_skip_reason(article)
+            if skip_reason:
+                log.info("SKIP %s — %s: %s", ref.article_id, skip_reason, article.title)
+                skipped.append({
+                    "article_id": ref.article_id,
+                    "title": article.title,
+                    "url": ref.url,
+                    "reason": skip_reason,
+                })
+                if not dry_run:
+                    source.advance_state(state, article)
+                    save_state(state_path, state)
+                continue
+
             result = repost_article(client, source, article, dry_run=dry_run, publish=publish)
             processed.append({
                 "article_id": ref.article_id,
@@ -254,7 +273,8 @@ def run(
                 "error": str(e),
             })
 
-    log.info("Done. %d processed, %d failed.", len(processed), len(failures))
+    log.info("Done. %d processed, %d skipped, %d failed.",
+             len(processed), len(skipped), len(failures))
     return 1 if failures else 0
 
 
