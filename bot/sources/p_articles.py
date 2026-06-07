@@ -25,6 +25,14 @@ CREDIT_LINKS = [
     ("虛詞・無形Patreon",  "https://www.patreon.com/thehouseofhk_literature"),
 ]
 
+# 虛詞 sometimes republishes pieces authorized from other platforms, marked
+# "（文章授權轉載自「<平台>」）" in the body (e.g. Openbook閱讀誌, 端傳媒). We only
+# mirror 虛詞's own content, so any article whose body contains one of these
+# substrings is skipped. Substring match — keep specific to avoid false hits.
+SKIP_BODY_MARKERS = [
+    "授權轉載自",
+]
+
 # Tags we keep in the article body. Anything else gets unwrapped (children kept,
 # tag removed). Matters' editor is conservative — keep this list narrow.
 ALLOWED_TAGS = {
@@ -119,6 +127,15 @@ class PArticlesSource(Source):
                 "numeric_id": ref.extra.get("numeric_id"),
             },
         )
+
+    # ----- content policy -----
+
+    def repost_skip_reason(self, article: Article) -> Optional[str]:
+        body = article.body_html or ""
+        for marker in SKIP_BODY_MARKERS:
+            if marker in body:
+                return f"third-party repost (body contains {marker!r})"
+        return None
 
     # ----- state tracking -----
 

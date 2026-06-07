@@ -166,6 +166,16 @@ class Source(ABC):
         (e.g. curl_cffi for sites that block standard fingerprints)."""
         return make_scraper_session(use_cloudscraper=self.use_cloudscraper)
 
+    def repost_skip_reason(self, article: "Article") -> Optional[str]:
+        """Return a reason to SKIP reposting this article, or None to repost.
+
+        Base default: never skip. Sources override to apply their own content
+        policy (e.g. p-articles skips pieces it reposted from a third platform).
+        The orchestrator calls this after fetch_article; when a reason is
+        returned it skips the draft and advances state past the article.
+        """
+        return None
+
     @abstractmethod
     def list_recent_article_refs(self) -> list[ArticleRef]:
         """Return refs visible on the source's listing/homepage right now."""
