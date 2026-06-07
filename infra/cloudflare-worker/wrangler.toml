@@ -1,0 +1,5 @@
+name = "collective-feed-proxy"
+main = "collective-feed-proxy.js"
+compatibility_date = "2024-11-01"
+
+# No KV / bindings / secrets needed — this is a stateless allowlisted fetch proxy.

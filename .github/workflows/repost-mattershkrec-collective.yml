@@ -46,6 +46,9 @@ jobs:
         env:
           MATTERS_EMAIL: ${{ secrets.MATTERSHKREC_EMAIL }}
           MATTERS_PASSWORD: ${{ secrets.MATTERSHKREC_PASSWORD }}
+          # Clean-IP proxy prefix for the feed fetch (SiteGround blocks GHA IPs).
+          # Unset → direct fetch. See infra/cloudflare-worker/.
+          COLLECTIVE_FEED_PROXY: ${{ secrets.COLLECTIVE_FEED_PROXY }}
         run: |
           ARGS="--source $SOURCE --state $STATE_FILE"
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi

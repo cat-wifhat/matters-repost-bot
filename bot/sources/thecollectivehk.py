@@ -19,10 +19,11 @@ orchestrator caps each run at 10 anyway, so the window is not a constraint.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from email.utils import parsedate_to_datetime
 from html import escape
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 from xml.etree import ElementTree as ET
 
 from bs4 import BeautifulSoup, Tag
@@ -76,8 +77,24 @@ class TheCollectiveHkSource(Source):
 
     # ----- listing & fetching -----
 
+    def _feed_url(self) -> str:
+        """The feed URL, optionally routed through a clean-IP proxy.
+
+        thecollectivehk's SiteGround WAF challenges all datacenter-IP requests
+        (GitHub Actions) with an sgcaptcha interstitial, so direct fetches from
+        CI fail. Set COLLECTIVE_FEED_PROXY to a URL-prefix proxy that fetches
+        from a non-flagged IP and returns the body verbatim — e.g. the bundled
+        Cloudflare Worker (infra/cloudflare-worker/), where the secret is
+        "https://<worker>.workers.dev/?url=". Unset → direct fetch (works
+        locally / from residential IPs).
+        """
+        proxy = os.environ.get("COLLECTIVE_FEED_PROXY", "").strip()
+        if not proxy:
+            return FEED
+        return proxy + quote(FEED, safe="")
+
     def _load_feed(self) -> dict[int, dict]:
-        xml = fetch_text(self.session(), FEED)
+        xml = fetch_text(self.session(), self._feed_url())
         items = _parse_feed(xml)
         self._items_by_id = {it["wp_id"]: it for it in items}
         return self._items_by_id
