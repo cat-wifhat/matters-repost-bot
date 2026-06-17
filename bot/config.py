@@ -15,7 +15,9 @@ MATTERS_PASSWORD = os.environ.get("MATTERS_PASSWORD", "")
 DRY_RUN = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
 PUBLISH = os.environ.get("PUBLISH", "").lower() in ("1", "true", "yes")
 
-MAX_ARTICLES_PER_RUN = int(os.environ.get("MAX_ARTICLES_PER_RUN", "10"))
+# Cap per run. Raised to 20 for auto-publish: a 虛詞 Thursday cycle can schedule
+# up to 11 (2 immediate + 9 slots) plus a few overflow drafts.
+MAX_ARTICLES_PER_RUN = int(os.environ.get("MAX_ARTICLES_PER_RUN", "20"))
 
 # Minutes to wait between successive publish() calls when auto-publishing.
 # Matters' rate limit is 2 publishes per 12 minutes; 30 min/article is a wide

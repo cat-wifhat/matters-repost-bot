@@ -13,7 +13,16 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
+# Sentinel returned by publish_schedule() meaning "publish immediately".
+PUBLISH_NOW = "NOW"
+
+
+def iso_utc(dt: datetime) -> str:
+    """Format a UTC datetime as the ISO-8601 string Matters' publishAt accepts."""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 import cloudscraper
 import requests
@@ -175,6 +184,34 @@ class Source(ABC):
         returned it skips the draft and advances state past the article.
         """
         return None
+
+    # ----- auto-publish scheduling -----
+
+    def publish_order_key(self, ref: ArticleRef) -> Any:
+        """Sort key for publishing oldest-first. Override per source.
+
+        Default 0 keeps listing order; sources back this with their numeric id
+        (p-articles numeric_id, WordPress wp_id) so older articles publish first.
+        """
+        return 0
+
+    def publish_schedule(self, count: int, now_utc: datetime) -> list[Optional[str]]:
+        """Given `count` articles (already oldest-first), return a per-article
+        disposition aligned by index:
+
+        - PUBLISH_NOW  -> publish immediately
+        - <ISO string> -> schedule via Matters publishAt at that UTC time
+        - None         -> leave as a draft (don't publish)
+
+        Default policy (used by 法庭線): publish 2 immediately, then each further
+        pair 12 minutes later — honours Matters' "2 publishes / 12 min" cap
+        without sleeping the runner. Sources override for richer schedules.
+        """
+        out: list[Optional[str]] = []
+        for i in range(count):
+            pair = i // 2
+            out.append(PUBLISH_NOW if pair == 0 else iso_utc(now_utc + timedelta(minutes=12 * pair)))
+        return out
 
     @abstractmethod
     def list_recent_article_refs(self) -> list[ArticleRef]:

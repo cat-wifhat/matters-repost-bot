@@ -131,6 +131,14 @@ class TheWitnessHkSource(Source):
             extra={"wp_id": ref.extra["wp_id"]},
         )
 
+    # ----- auto-publish -----
+
+    def publish_order_key(self, ref: ArticleRef):
+        return ref.extra["wp_id"]
+
+    # Uses the base publish_schedule: 2 immediately, then pairs +12 min apart
+    # (法庭線 normally has 0–1 專題 articles per run, so this is just "publish now").
+
     # ----- state tracking -----
 
     def is_new(self, ref: ArticleRef, state: dict) -> bool:

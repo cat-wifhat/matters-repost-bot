@@ -49,6 +49,9 @@ jobs:
         env:
           MATTERS_EMAIL: ${{ secrets.MATTERS_EMAIL }}
           MATTERS_PASSWORD: ${{ secrets.MATTERS_PASSWORD }}
+          # Auto-publish on a weekly drip schedule (2 immediate + Tue/Wed or
+          # Fri/Sat/Sun 09–11 HKT slots via Matters publishAt). See p_articles.
+          PUBLISH: "true"
         run: |
           ARGS="--source $SOURCE --state $STATE_FILE"
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi

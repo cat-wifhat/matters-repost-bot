@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Optional
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
-from .base import Article, ArticleRef, Source
+from .base import PUBLISH_NOW, Article, ArticleRef, Source, iso_utc
 
 log = logging.getLogger(__name__)
 
@@ -137,6 +138,23 @@ class PArticlesSource(Source):
                 return f"third-party repost (body contains {marker!r})"
         return None
 
+    # ----- auto-publish schedule -----
+
+    def publish_order_key(self, ref: ArticleRef):
+        return ref.extra["numeric_id"]
+
+    def publish_schedule(self, count: int, now_utc):
+        """Weekly drip (times are 東八區 / HKT):
+
+        - Mon run:  2 immediately; rest -> Tue 09/10/11, Wed 09/10/11
+        - Thu run:  2 immediately; rest -> Fri/Sat/Sun 09/10/11
+        - beyond the available slots -> None (left as draft)
+
+        The bot runs Mon & Thu HKT; cycle is picked by the run's HKT weekday
+        (Mon–Wed -> Mon cycle, Thu–Sun -> Thu cycle) so manual runs still behave.
+        """
+        return _virtue_schedule(count, now_utc)
+
     # ----- state tracking -----
 
     def is_new(self, ref: ArticleRef, state: dict) -> bool:
@@ -174,6 +192,44 @@ class PArticlesSource(Source):
             f'<p><a href="{escape(url)}">{escape(label)}</a></p>'
             for label, url in CREDIT_LINKS
         )
+
+
+# ----- publish-schedule helpers (private) -----
+
+# Slots as (HKT weekday, HKT hour); weekday Mon=0 … Sun=6.
+_MON_CYCLE_SLOTS = [(1, 9), (1, 10), (1, 11), (2, 9), (2, 10), (2, 11)]            # Tue, Wed
+_THU_CYCLE_SLOTS = [(4, 9), (4, 10), (4, 11), (5, 9), (5, 10), (5, 11),
+                    (6, 9), (6, 10), (6, 11)]                                      # Fri, Sat, Sun
+
+
+def _hkt_naive(now_utc: datetime) -> datetime:
+    """now (UTC, aware) -> naive datetime representing HKT (UTC+8) wall-clock."""
+    return (now_utc.astimezone(timezone.utc) + timedelta(hours=8)).replace(tzinfo=None)
+
+
+def _next_slot_iso(now_utc: datetime, hkt_weekday: int, hkt_hour: int) -> str:
+    """UTC ISO string of the next <hkt_weekday> at <hkt_hour>:00 HKT after now."""
+    hkt_now = _hkt_naive(now_utc)
+    days_ahead = (hkt_weekday - hkt_now.weekday()) % 7
+    slot = (hkt_now + timedelta(days=days_ahead)).replace(
+        hour=hkt_hour, minute=0, second=0, microsecond=0)
+    if slot <= hkt_now:
+        slot += timedelta(days=7)
+    return iso_utc((slot - timedelta(hours=8)).replace(tzinfo=timezone.utc))
+
+
+def _virtue_schedule(count: int, now_utc: datetime) -> list[Optional[str]]:
+    slots = _MON_CYCLE_SLOTS if _hkt_naive(now_utc).weekday() <= 2 else _THU_CYCLE_SLOTS
+    out: list[Optional[str]] = []
+    for i in range(count):
+        if i < 2:
+            out.append(PUBLISH_NOW)
+        elif i - 2 < len(slots):
+            wd, hr = slots[i - 2]
+            out.append(_next_slot_iso(now_utc, wd, hr))
+        else:
+            out.append(None)            # overflow -> leave as draft
+    return out
 
 
 # ----- helpers (private) -----

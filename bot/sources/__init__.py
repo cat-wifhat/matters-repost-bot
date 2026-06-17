@@ -1,5 +1,13 @@
 """Source registry — add new sources to _REGISTRY as they're implemented."""
-from .base import Article, ArticleRef, Source, fetch_image_bytes, make_scraper_session
+from .base import (
+    PUBLISH_NOW,
+    Article,
+    ArticleRef,
+    Source,
+    fetch_image_bytes,
+    iso_utc,
+    make_scraper_session,
+)
 from .p_articles import PArticlesSource
 from .thecollectivehk import TheCollectiveHkSource
 from .thewitnesshk import TheWitnessHkSource
@@ -26,4 +34,5 @@ __all__ = [
     "Article", "ArticleRef", "Source",
     "fetch_image_bytes", "make_scraper_session",
     "get_source", "known_sources",
+    "PUBLISH_NOW", "iso_utc",
 ]

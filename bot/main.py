@@ -6,14 +6,16 @@ import json
 import logging
 import re
 import sys
-import time
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Optional
 
 from . import config
 from .matters_client import MattersClient, MattersError
-from .sources import Article, Source, fetch_image_bytes, get_source, known_sources
+from .sources import (
+    PUBLISH_NOW, Article, Source, fetch_image_bytes, get_source, known_sources,
+)
 
 log = logging.getLogger("repost")
 
@@ -78,18 +80,16 @@ def _extract_body_image_srcs(body_html: str) -> list[str]:
 
 # ---- repost one article ----
 
-def repost_article(
-    client: Optional[MattersClient],
+def create_filled_draft(
+    client: MattersClient,
     source: Source,
     article: Article,
-    *,
-    dry_run: bool,
-    publish: bool,
-) -> Optional[dict]:
-    if dry_run:
-        log.info("[DRY-RUN] would repost: %s — %s", article.source, article.title)
-        return None
+) -> str:
+    """Create a Matters draft, upload images, and fill the full content.
 
+    Returns the draft id. Whether/when to publish is decided by the caller
+    (immediate, scheduled via publishAt, or left as a draft).
+    """
     log.info("Creating empty draft: %s", article.title)
     draft_id = client.create_empty_draft(title=article.title)
     log.info("  draft_id=%s", draft_id)
@@ -151,7 +151,7 @@ def repost_article(
 
     log.info("Updating draft with full content (%d chars, %d tags)",
              len(full_content), len(tags))
-    result = client.update_draft(
+    client.update_draft(
         draft_id,
         title=article.title,
         content=full_content,
@@ -160,17 +160,7 @@ def repost_article(
         license="arr",
     )
 
-    if publish:
-        log.info("Publishing draft %s", draft_id)
-        try:
-            result = client.publish_draft(draft_id)
-        except MattersError as e:
-            # Don't fail the whole article on publish error — the draft is
-            # already populated; leave it for the user to publish manually.
-            # Matters' rate limit ("操作過於頻繁") most often shows up here.
-            log.warning("Publish failed (leaving as draft): %s", e)
-
-    return result
+    return draft_id
 
 
 # ---- main loop ----
@@ -199,6 +189,8 @@ def run(
         return 0
 
     new_refs = [r for r in refs if source.is_new(r, state)]
+    # Publish oldest-first so the Matters timeline reads chronologically.
+    new_refs.sort(key=source.publish_order_key)
     log.info("New articles to repost: %d", len(new_refs))
 
     if not new_refs:
@@ -212,6 +204,12 @@ def run(
         )
         new_refs = new_refs[:max_articles]
 
+    # When auto-publishing, decide each article's disposition (immediate /
+    # scheduled via publishAt / left as draft). Indexed by *published* position
+    # so skipped articles don't consume a slot.
+    now_utc = datetime.now(timezone.utc)
+    dispositions = source.publish_schedule(len(new_refs), now_utc) if publish else []
+
     client: Optional[MattersClient] = None
     if not dry_run:
         if not config.MATTERS_EMAIL or not config.MATTERS_PASSWORD:
@@ -223,55 +221,60 @@ def run(
     processed: list[dict] = []
     failures: list[dict] = []
     skipped: list[dict] = []
-    for i, ref in enumerate(new_refs):
-        is_last = (i == len(new_refs) - 1)
+    publish_idx = 0
+    for ref in new_refs:
         try:
             log.info("---- %s %s ----", source_name, ref.article_id)
             article = source.fetch_article(ref)
 
             # Content-policy filter (e.g. drop the source's own third-party
             # reposts). Mark as seen so we don't re-fetch it every run, but
-            # never advance state in dry-run.
+            # never advance state in dry-run. Skips don't consume a publish slot.
             skip_reason = source.repost_skip_reason(article)
             if skip_reason:
                 log.info("SKIP %s — %s: %s", ref.article_id, skip_reason, article.title)
-                skipped.append({
-                    "article_id": ref.article_id,
-                    "title": article.title,
-                    "url": ref.url,
-                    "reason": skip_reason,
-                })
+                skipped.append({"article_id": ref.article_id, "title": article.title,
+                                "url": ref.url, "reason": skip_reason})
                 if not dry_run:
                     source.advance_state(state, article)
                     save_state(state_path, state)
                 continue
 
-            result = repost_article(client, source, article, dry_run=dry_run, publish=publish)
-            processed.append({
-                "article_id": ref.article_id,
-                "title": article.title,
-                "url": ref.url,
-                "draft": result,
-            })
+            disp = dispositions[publish_idx] if publish and publish_idx < len(dispositions) else None
+            if publish:
+                publish_idx += 1
+            plan = ("publish now" if disp == PUBLISH_NOW
+                    else f"schedule {disp}" if disp
+                    else ("leave as draft" if publish else "draft (no publish)"))
+
+            if dry_run:
+                log.info("[DRY-RUN] %s — %s", plan, article.title)
+                processed.append({"article_id": ref.article_id, "title": article.title,
+                                  "url": ref.url, "plan": plan})
+                continue
+
+            draft_id = create_filled_draft(client, source, article)
+            if publish:
+                try:
+                    if disp == PUBLISH_NOW:
+                        client.publish_draft(draft_id)
+                        log.info("  published now")
+                    elif disp:
+                        client.publish_draft(draft_id, publish_at=disp)
+                        log.info("  scheduled publishAt=%s", disp)
+                    else:
+                        log.info("  left as draft (beyond schedule capacity)")
+                except MattersError as e:
+                    # Draft is already filled; leave it rather than fail the article.
+                    log.warning("Publish/schedule failed (left as draft): %s", e)
+            processed.append({"article_id": ref.article_id, "title": article.title,
+                              "url": ref.url, "draft": draft_id, "plan": plan})
             # Advance state only on success so failures get retried next run.
-            # Skip in dry-run: state should reflect actual reposts only.
-            if not dry_run:
-                source.advance_state(state, article)
-                save_state(state_path, state)
-            # Pace successive publishes — Matters caps at 2 per 12 min.
-            if publish and not dry_run and not is_last:
-                wait_min = config.PUBLISH_INTERVAL_MINUTES
-                log.info("Sleeping %d min before next publish (Matters rate limit)", wait_min)
-                time.sleep(wait_min * 60)
-            elif not is_last:
-                time.sleep(2)
+            source.advance_state(state, article)
+            save_state(state_path, state)
         except Exception as e:
             log.exception("Failed processing %s: %s", ref.article_id, e)
-            failures.append({
-                "article_id": ref.article_id,
-                "url": ref.url,
-                "error": str(e),
-            })
+            failures.append({"article_id": ref.article_id, "url": ref.url, "error": str(e)})
 
     log.info("Done. %d processed, %d skipped, %d failed.",
              len(processed), len(skipped), len(failures))

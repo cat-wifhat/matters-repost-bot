@@ -46,6 +46,8 @@ jobs:
         env:
           MATTERS_EMAIL: ${{ secrets.MATTERSHKREC_EMAIL }}
           MATTERS_PASSWORD: ${{ secrets.MATTERSHKREC_PASSWORD }}
+          # Auto-publish immediately (up to 2 at once; 法庭線 has few articles).
+          PUBLISH: "true"
         run: |
           ARGS="--source $SOURCE --state $STATE_FILE"
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
