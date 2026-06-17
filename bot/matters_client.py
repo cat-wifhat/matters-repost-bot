@@ -111,13 +111,29 @@ class MattersClient:
             inp["cover"] = cover_asset_id
         return self._gql(query, {"input": inp})["putDraft"]
 
-    def publish_draft(self, draft_id: str) -> dict:
+    def publish_draft(self, draft_id: str, *, publish_at: Optional[str] = None) -> dict:
+        """Publish a draft. With `publish_at` (ISO-8601 DateTime, e.g.
+        '2026-06-17T01:00:00.000Z') Matters schedules it: the draft goes to
+        publishState 'pending' and is published server-side at that time.
+        Without it, the draft publishes immediately.
+        """
         query = """
         mutation Publish($input: PublishArticleInput!) {
-          publishArticle(input: $input) { id publishState }
+          publishArticle(input: $input) { id publishState publishAt }
         }
         """
-        return self._gql(query, {"input": {"id": draft_id}})["publishArticle"]
+        inp: dict[str, Any] = {"id": draft_id}
+        if publish_at:
+            inp["publishAt"] = publish_at
+        return self._gql(query, {"input": inp})["publishArticle"]
+
+    def delete_draft(self, draft_id: str) -> Any:
+        query = """
+        mutation Del($input: DeleteDraftInput!) {
+          deleteDraft(input: $input)
+        }
+        """
+        return self._gql(query, {"input": {"id": draft_id}})["deleteDraft"]
 
     # ---- assets ----
 

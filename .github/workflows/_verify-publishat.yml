@@ -1,0 +1,23 @@
+name: _verify publishAt (one-off)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify publishAt (creates + schedules + deletes a test draft)
+        env:
+          MATTERS_EMAIL: ${{ secrets.MATTERS_EMAIL }}
+          MATTERS_PASSWORD: ${{ secrets.MATTERS_PASSWORD }}
+        run: python -m tools.verify_publishat
