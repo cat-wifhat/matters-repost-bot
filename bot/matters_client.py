@@ -127,6 +127,19 @@ class MattersClient:
             inp["publishAt"] = publish_at
         return self._gql(query, {"input": inp})["publishArticle"]
 
+    def list_drafts(self, first: int = 50) -> list[dict]:
+        """Return the logged-in user's drafts: [{id, title, publishState}]."""
+        query = """
+        query Drafts($input: ConnectionArgs!) {
+          viewer { drafts(input: $input) {
+            edges { node { id title publishState publishAt } }
+          } }
+        }
+        """
+        data = self._gql(query, {"input": {"first": first}})
+        edges = (((data.get("viewer") or {}).get("drafts") or {}).get("edges") or [])
+        return [e["node"] for e in edges]
+
     def delete_draft(self, draft_id: str) -> Any:
         query = """
         mutation Del($input: DeleteDraftInput!) {

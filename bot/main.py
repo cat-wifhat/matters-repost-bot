@@ -382,6 +382,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="Record current refs as seen without posting anything.")
     parser.add_argument("--drip", action="store_true",
                         help="Publish due items from the publish queue (no fetch).")
+    parser.add_argument("--list-drafts", action="store_true",
+                        help="Print the account's drafts (id / state / title) and exit.")
     parser.add_argument("--max", type=int, default=config.MAX_ARTICLES_PER_RUN,
                         help="Cap on articles processed per run.")
     args = parser.parse_args(argv)
@@ -394,6 +396,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     state_path = args.state or f"state/{args.source}.json"
     dry_run = args.dry_run or config.DRY_RUN
     publish = args.publish or config.PUBLISH
+
+    if args.list_drafts:
+        client = MattersClient()
+        client.login(config.MATTERS_EMAIL, config.MATTERS_PASSWORD)
+        for d in client.list_drafts(first=100):
+            log.info("DRAFT id=%s state=%s | %s", d.get("id"), d.get("publishState"), d.get("title"))
+        return 0
 
     if args.drip:
         return run_drip(state_path=state_path, dry_run=dry_run)

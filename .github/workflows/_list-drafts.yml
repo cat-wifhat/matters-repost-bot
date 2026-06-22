@@ -1,0 +1,23 @@
+name: _list drafts (one-off)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: List @mattershklit drafts
+        env:
+          MATTERS_EMAIL: ${{ secrets.MATTERS_EMAIL }}
+          MATTERS_PASSWORD: ${{ secrets.MATTERS_PASSWORD }}
+        run: python -m bot.main --source p_articles --list-drafts
