@@ -200,18 +200,14 @@ class Source(ABC):
         disposition aligned by index:
 
         - PUBLISH_NOW  -> publish immediately
-        - <ISO string> -> schedule via Matters publishAt at that UTC time
+        - <ISO string> -> queue for the drip workflow to publish at that UTC time
         - None         -> leave as a draft (don't publish)
 
-        Default policy (used by 法庭線): publish 2 immediately, then each further
-        pair 12 minutes later — honours Matters' "2 publishes / 12 min" cap
-        without sleeping the runner. Sources override for richer schedules.
+        Default policy (used by 法庭線): publish at most 2 immediately, leave any
+        rest as drafts. 法庭線 normally has 0–1 articles per run, and it has no
+        drip workflow, so there's nothing to queue.
         """
-        out: list[Optional[str]] = []
-        for i in range(count):
-            pair = i // 2
-            out.append(PUBLISH_NOW if pair == 0 else iso_utc(now_utc + timedelta(minutes=12 * pair)))
-        return out
+        return [PUBLISH_NOW if i < 2 else None for i in range(count)]
 
     @abstractmethod
     def list_recent_article_refs(self) -> list[ArticleRef]:

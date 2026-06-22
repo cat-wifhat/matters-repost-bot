@@ -61,14 +61,11 @@ jobs:
 
       - name: Commit updated state
         run: |
-          if [ ! -f "$STATE_FILE" ]; then
-            echo "$STATE_FILE was not produced; nothing to commit"
-            exit 0
-          fi
-          git add "$STATE_FILE"
+          # State cursor + the publish queue (created by the drip schedule).
+          git add "$STATE_FILE" "${STATE_FILE%.json}_queue.json" 2>/dev/null || git add "$STATE_FILE"
           # --cached catches both new and modified files; plain `git diff` misses new files.
-          if git diff --cached --quiet -- "$STATE_FILE"; then
-            echo "$STATE_FILE unchanged"
+          if git diff --cached --quiet; then
+            echo "nothing changed"
             exit 0
           fi
           git config user.name "repost-bot"
