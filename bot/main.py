@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -222,6 +223,7 @@ def run(
     failures: list[dict] = []
     skipped: list[dict] = []
     publish_idx = 0
+    pub_calls = 0   # successful publishArticle calls, for rate-limit throttling
     for ref in new_refs:
         try:
             log.info("---- %s %s ----", source_name, ref.article_id)
@@ -254,19 +256,27 @@ def run(
                 continue
 
             draft_id = create_filled_draft(client, source, article)
-            if publish:
+            if publish and disp is not None:
+                # Throttle: Matters allows 2 publishArticle calls per 12 min,
+                # scheduling calls included. Sleep before starting each new
+                # window so the future-dated schedules don't get rejected.
+                if pub_calls and pub_calls % 2 == 0:
+                    log.info("Matters rate limit: sleeping %ds before next 2 publishes",
+                             config.PUBLISH_WINDOW_SECONDS)
+                    time.sleep(config.PUBLISH_WINDOW_SECONDS)
                 try:
                     if disp == PUBLISH_NOW:
                         client.publish_draft(draft_id)
                         log.info("  published now")
-                    elif disp:
+                    else:
                         client.publish_draft(draft_id, publish_at=disp)
                         log.info("  scheduled publishAt=%s", disp)
-                    else:
-                        log.info("  left as draft (beyond schedule capacity)")
+                    pub_calls += 1
                 except MattersError as e:
                     # Draft is already filled; leave it rather than fail the article.
                     log.warning("Publish/schedule failed (left as draft): %s", e)
+            elif publish:
+                log.info("  left as draft (beyond schedule capacity)")
             processed.append({"article_id": ref.article_id, "title": article.title,
                               "url": ref.url, "draft": draft_id, "plan": plan})
             # Advance state only on success so failures get retried next run.

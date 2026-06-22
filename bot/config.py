@@ -19,10 +19,11 @@ PUBLISH = os.environ.get("PUBLISH", "").lower() in ("1", "true", "yes")
 # up to 11 (2 immediate + 9 slots) plus a few overflow drafts.
 MAX_ARTICLES_PER_RUN = int(os.environ.get("MAX_ARTICLES_PER_RUN", "20"))
 
-# Minutes to wait between successive publish() calls when auto-publishing.
-# Matters' rate limit is 2 publishes per 12 minutes; 30 min/article is a wide
-# safety margin.
-PUBLISH_INTERVAL_MINUTES = int(os.environ.get("PUBLISH_INTERVAL_MINUTES", "30"))
+# Matters caps publishArticle at 2 calls per 12 minutes — and that cap applies
+# to *scheduled* calls (future publishAt) too, not just immediate publishes. So
+# auto-publish throttles to 2 calls per window and sleeps this long between
+# windows (12 min + buffer).
+PUBLISH_WINDOW_SECONDS = int(os.environ.get("PUBLISH_WINDOW_SECONDS", "780"))
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
