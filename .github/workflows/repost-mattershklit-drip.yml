@@ -5,9 +5,10 @@ name: Drip-publish queued 虛詞 → @mattershklit
 # because Matters rate-limits publishArticle — including its native scheduling.
 on:
   schedule:
-    # 09:00 / 10:00 / 11:00 HKT = 01:00 / 02:00 / 03:00 UTC, on
-    # Tue(2) Wed(3) Fri(5) Sat(6) Sun(0). Each run publishes whatever is due.
-    - cron: "0 1,2,3 * * 0,2,3,5,6"
+    # 09:00 / 15:00 / 21:00 HKT = 01:00 / 07:00 / 13:00 UTC, spread across the
+    # day so GitHub-scheduler delays don't bunch the slots. One post per run.
+    # Tue(2) Wed(3) Fri(5) Sat(6) Sun(0).
+    - cron: "0 1,7,13 * * 0,2,3,5,6"
   workflow_dispatch:
     inputs:
       dry_run:

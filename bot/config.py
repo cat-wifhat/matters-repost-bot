@@ -25,6 +25,12 @@ MAX_ARTICLES_PER_RUN = int(os.environ.get("MAX_ARTICLES_PER_RUN", "20"))
 # windows (12 min + buffer).
 PUBLISH_WINDOW_SECONDS = int(os.environ.get("PUBLISH_WINDOW_SECONDS", "780"))
 
+# Drip mode publishes at most this many articles per run (default 1 = true drip).
+# GitHub's scheduler often delays a run by hours; by then a whole day's slots are
+# all "due", and publishing them together floods the feed. A hard per-run cap
+# keeps it to one post per scheduled slot no matter how late the run fires.
+DRIP_MAX_PER_RUN = int(os.environ.get("DRIP_MAX_PER_RUN", "1"))
+
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"

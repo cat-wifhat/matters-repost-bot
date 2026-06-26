@@ -322,8 +322,9 @@ def run(
 
 def run_drip(*, state_path: str, dry_run: bool) -> int:
     """Publish queued drafts whose slot time has arrived. Fired by the drip
-    workflow at each slot (Tue/Wed/Fri/Sat/Sun 09/10/11 HKT). One run normally
-    publishes a single article, so it never approaches the rate limit."""
+    workflow at each slot (Tue/Wed/Fri/Sat/Sun 09/15/21 HKT). Publishes at most
+    config.DRIP_MAX_PER_RUN (default 1) per run — even if the run fires late and
+    several slots are already due — so it never bursts or hits the rate limit."""
     queue_path = queue_path_for(state_path)
     queue = load_queue(queue_path)
     now_iso = iso_utc(datetime.now(timezone.utc))
@@ -347,7 +348,7 @@ def run_drip(*, state_path: str, dry_run: bool) -> int:
     published: set[str] = set()
     failed = 0
     pub_calls = 0
-    for it in due:
+    for it in due[:config.DRIP_MAX_PER_RUN]:
         if pub_calls and pub_calls % 2 == 0:
             log.info("Rate-limit guard: sleeping %ds", config.PUBLISH_WINDOW_SECONDS)
             time.sleep(config.PUBLISH_WINDOW_SECONDS)
