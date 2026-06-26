@@ -345,27 +345,44 @@ def run_drip(*, state_path: str, dry_run: bool) -> int:
     client = MattersClient()
     client.login(config.MATTERS_EMAIL, config.MATTERS_PASSWORD)
 
-    published: set[str] = set()
+    # Dedup: any due item whose draft is no longer 'unpublished' was already
+    # published (e.g. a prior run that published but didn't commit the queue) —
+    # drop it instead of re-publishing, so we can never duplicate. If the lookup
+    # fails, abort without touching the queue (better stuck than duplicate).
+    try:
+        unpublished = {d["id"] for d in client.list_drafts(first=100)
+                       if d.get("publishState") == "unpublished"}
+    except MattersError as e:
+        log.error("Could not list drafts for dedup; aborting: %s", e)
+        return 1
+    remove: set[str] = set()
+    for it in due:
+        if it["draft_id"] not in unpublished:
+            log.info("Already published — dropping from queue: %s — %s",
+                     it["draft_id"], it.get("title", ""))
+            remove.add(it["draft_id"])
+    fresh = [it for it in due if it["draft_id"] in unpublished]
+
     failed = 0
     pub_calls = 0
-    for it in due[:config.DRIP_MAX_PER_RUN]:
+    for it in fresh[:config.DRIP_MAX_PER_RUN]:
         if pub_calls and pub_calls % 2 == 0:
             log.info("Rate-limit guard: sleeping %ds", config.PUBLISH_WINDOW_SECONDS)
             time.sleep(config.PUBLISH_WINDOW_SECONDS)
         try:
             client.publish_draft(it["draft_id"])   # publish now (no publishAt)
             log.info("Published %s — %s", it["draft_id"], it.get("title", ""))
-            published.add(it["draft_id"])
+            remove.add(it["draft_id"])
             pub_calls += 1
         except MattersError as e:
             # Keep it queued so the next slot retries.
             log.warning("Publish failed (will retry next slot): %s — %s", e, it.get("title", ""))
             failed += 1
 
-    remaining = [it for it in queue if it["draft_id"] not in published]
+    remaining = [it for it in queue if it["draft_id"] not in remove]
     save_queue(queue_path, remaining)
-    log.info("Drip done. %d published, %d failed, %d still queued.",
-             len(published), failed, len(remaining))
+    log.info("Drip done. %d removed (published/stale), %d failed, %d still queued.",
+             len(remove), failed, len(remaining))
     return 1 if failed else 0
 
 
