@@ -1,0 +1,10 @@
+# 讓 Dependabot 每週檢查 GitHub Actions 是否有新版，有就自動開 PR（你按合併即可）。
+# 只管 CI 的 action 版本，不碰 bot 程式或依賴。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"
