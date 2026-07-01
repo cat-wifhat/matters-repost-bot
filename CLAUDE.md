@@ -1,44 +1,50 @@
 # CLAUDE.md
 
-Guidance for working in this repo. (The `README.md` is an older single-source
-write-up and is partly stale — trust this file and the code over it.)
+Guidance for working in this repo. `README.md` is the user-facing overview and
+`docs/operations-log.md` is the change/incident log — **keep all three in sync**.
+Repo owner is **cat-wifhat** (renamed from dw-wq); use `gh auth switch --user
+cat-wifhat` for git/gh.
 
 ## What this is
 
 A multi-source repost bot that mirrors articles from independent Hong Kong
 media sites to corresponding **Matters.town** accounts. Each run pulls a
-source's recent articles, figures out which are new, and creates them as
-**drafts** on Matters (left for manual review/publish by default). Runs on
-GitHub Actions cron — no always-on server.
+source's recent articles, figures out which are new, and **auto-publishes** them
+(virtue on a weekly drip schedule; witness immediately). Runs on GitHub Actions
+cron — no always-on server.
 
 Sources currently wired up:
 
 | Source name        | Site               | Matters account / state file              | Filter                    |
 |--------------------|--------------------|-------------------------------------------|---------------------------|
-| `p_articles`       | 虛詞・無形 (p-articles.com) | `@mattershklit` / `state/mattershklit.json` | per-category, by numeric id |
-| `thewitnesshk`     | 法庭線 (thewitnesshk.com)   | `state/mattershkrec_witness.json`         | 焦點 category (id 28)       |
-| `thecollectivehk`  | 集誌社 (thecollectivehk.com)| `state/mattershkrec_collective.json`      | 深度 / in-depth category (id 5) |
+| `p_articles`       | 虛詞・無形 (p-articles.com) | `@mattershklit` / `state/mattershklit.json` | per-category; skips third-party reposts |
+| `thewitnesshk`     | 法庭線 (thewitnesshk.com)   | `@mattershkrec` / `state/mattershkrec_witness.json` | 專題 / feature (category id 8) |
+| `thecollectivehk`  | 集誌社 (thecollectivehk.com)| `@mattershkrec` / `state/mattershkrec_collective.json` | 深度 (id 5) — **workflow disabled** (SiteGround blocks GHA IPs) |
 
 ## Architecture
 
 The orchestrator is **source-agnostic**; everything site-specific lives behind
 the `Source` abstraction.
 
-- `bot/main.py` — orchestrator. Loop: `list_recent_article_refs` → filter via
-  `is_new` → cap at `MAX_ARTICLES_PER_RUN` → for each: `fetch_article`,
-  `repost_article` (create draft, upload images, fill content), then
-  `advance_state` + save **on success only**. Also owns content composition
-  (`header + featured images + body + credit`) and the dry-run/bootstrap paths.
-- `bot/sources/base.py` — `Source` ABC + the `Article`/`ArticleRef`
-  dataclasses, plus shared HTTP helpers: `make_scraper_session` (cloudscraper),
-  `make_curl_cffi_session` (TLS-impersonation for stricter WAFs),
-  `fetch_image_bytes`, and `fetch_json` (retrying GET for flaky WP/Cloudflare
-  endpoints).
+- `bot/main.py` — orchestrator. `run()`: `list_recent_article_refs` → filter via
+  `is_new` → sort oldest-first (`publish_order_key`) → cap at
+  `MAX_ARTICLES_PER_RUN` → for each: `fetch_article`, skip if
+  `repost_skip_reason`, `create_filled_draft` (draft + images + content), then
+  apply the disposition from `publish_schedule` (publish now / enqueue / leave
+  draft), `advance_state` + save **on success only**. `run_drip()`: publishes
+  due items from the queue (drip mode). Also owns content composition and the
+  dry-run/bootstrap paths.
+- `bot/sources/base.py` — `Source` ABC + `Article`/`ArticleRef` dataclasses;
+  scheduling hooks (`publish_order_key`, `publish_schedule`, `PUBLISH_NOW`,
+  `iso_utc`) and `repost_skip_reason`; shared HTTP helpers
+  (`make_scraper_session`, `make_curl_cffi_session`, `fetch_image_bytes`,
+  `fetch_json`).
 - `bot/sources/__init__.py` — the source **registry**. Add new sources here
   (`get_source` / `known_sources` drive the `--source` CLI choices).
 - `bot/sources/{p_articles,thewitnesshk,thecollectivehk}.py` — concrete sources.
 - `bot/matters_client.py` — minimal Matters GraphQL client: `emailLogin`,
-  `putDraft` (create/update), `singleFileUpload` (multipart), `publishArticle`.
+  `putDraft`, `singleFileUpload`, `publishArticle` (with optional `publishAt`),
+  `deleteDraft`, `list_drafts` (used for drip dedup).
 - `bot/config.py` — env vars + generic constants only. **Per-source config
   (credit links, social URLs, header format) lives in the source module, not here.**
 - `.github/workflows/repost-*.yml` — one workflow per source/account.
@@ -46,11 +52,20 @@ the `Source` abstraction.
 
 ## Key decisions (and the reasons behind them)
 
-- **Drafts, not auto-publish.** Default leaves drafts for human review of
-  layout/images. `--publish` opts in; when publishing it sleeps
-  `PUBLISH_INTERVAL_MINUTES` (30) between articles because Matters caps at
-  ~2 publishes / 12 min. A publish failure is swallowed (draft already filled)
-  rather than failing the article.
+- **Auto-publish via our own drip queue — NOT Matters `publishAt`.** Matters
+  rate-limits `publishArticle` to ~2 calls / 12 min, and that cap *also* blocks
+  its native scheduling (future `publishAt`), even in bulk. So we don't use
+  Matters scheduling. Instead: the creation run publishes the 2 oldest
+  immediately and drops the rest into `state/<account>_queue.json`
+  (`[{draft_id, publish_at, title}]`); a **drip workflow** fires on a schedule
+  and `run_drip` publishes **≤1 due article per run** (`DRIP_MAX_PER_RUN`),
+  after a dedup check against live draft state (skip/drop anything no longer
+  `unpublished` → never republish → no duplicates). One-per-run keeps posts
+  spread out and each run fast (no timeout, no rate-limit hit). 法庭線 has no
+  queue — it just publishes ≤2 immediately (few 專題 articles).
+- **Skip third-party reposts (虛詞).** 虛詞 sometimes republishes pieces from
+  other platforms, marked「授權轉載自」in the body; `repost_skip_reason` skips
+  those (only 虛詞). We mirror first-party content only.
 - **Images are uploaded as bytes, not by URL.** We download each image with the
   *source's* session and push it to Matters via `singleFileUpload`. Matters'
   server-side image fetcher (`directImageUpload`) gets Cloudflare-blocked on
@@ -66,8 +81,11 @@ the `Source` abstraction.
   sites override `_make_session` to use `curl_cffi` with a Safari TLS
   fingerprint because their WAF blocks plain requests / chrome fingerprints
   from datacenter IPs.
-- **Cron at off-peak UTC** (`0 22 * * 0,3` = Mon & Thu 06:00 HKT) to dodge the
-  oversubscribed top-of-hour GHA scheduler.
+- **Crons (UTC).** Creation: `0 22 * * 0,3` (虛詞 = Mon/Thu 06:00 HKT),
+  `0 22 * * 1,4` (法庭線 = Tue/Fri 06:00 HKT). Drip: `0 1,7,13 * * 0,2,3,5,6`
+  (虛詞 = Tue/Wed/Fri/Sat/Sun 09:00/15:00/21:00 HKT). GHA cron is unreliable
+  (delayed/dropped runs), which is why drip is ≤1-per-run + due-based + dedup.
+- **Publishing is oldest-first** so the Matters timeline reads chronologically.
 - **License is always `arr`** (author retains all rights); **tags capped at 3**
   (Matters limit).
 
@@ -76,6 +94,9 @@ the `Source` abstraction.
 - `p_articles`: `{"last_seen_ids": {"<category>": <max numeric id>, ...}}` —
   per-category cursor; `is_new` is `numeric_id > last_seen[category]`.
 - WordPress sources: `{"last_seen_id": <wp post id>}` — single integer cursor.
+- **Publish queue** (虛詞 only): `state/mattershklit_queue.json` —
+  `[{draft_id, publish_at (ISO UTC), title}]`, drained by the drip workflow.
+  Committed back each run like state.
 
 First run (empty state) or `--bootstrap` records currently-visible refs as seen
 and posts nothing, so old articles aren't backfilled.
@@ -101,16 +122,18 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env        # fill MATTERS_EMAIL / MATTERS_PASSWORD
 
-# Dry run (no Matters calls):
-python -m bot.main --source p_articles --dry-run
+# Dry run (no Matters calls; shows the publish plan):
+python -m bot.main --source p_articles --dry-run --publish
 # Real run — state path defaults to state/<source>.json:
-python -m bot.main --source p_articles
+python -m bot.main --source p_articles --publish
+# Drip: publish due queued items (used by the drip workflow):
+python -m bot.main --source p_articles --drip
 ```
 
 Flags: `--source` (required), `--state PATH`, `--dry-run`, `--publish`,
-`--bootstrap`, `--max N`. Env equivalents: `DRY_RUN`, `PUBLISH`,
-`MAX_ARTICLES_PER_RUN`, `PUBLISH_INTERVAL_MINUTES`. Exit codes: `0` success,
-`1` some articles failed, `2` missing auth/config.
+`--bootstrap`, `--drip`, `--list-drafts`, `--max N`. Env equivalents: `DRY_RUN`,
+`PUBLISH`, `MAX_ARTICLES_PER_RUN`, `DRIP_MAX_PER_RUN`, `PUBLISH_WINDOW_SECONDS`.
+Exit codes: `0` success, `1` some articles failed, `2` missing auth/config.
 
 ## Gotchas
 
