@@ -4,9 +4,28 @@ A human-readable record of notable changes, decisions, incidents, and the
 commands used — to complement `git log`. Newest first. Dates are 東八區 (HKT)
 unless marked UTC.
 
-> Quick status (2026-06-27): auto-publish is live for 虛詞 (@mattershklit) and
+> Quick status (2026-07-02): auto-publish is live for 虛詞 (@mattershklit) and
 > 法庭線 (@mattershkrec). 集誌社 is disabled. Publishing is driven by our own
 > **drip queue**, not Matters' scheduling. GitHub owner is **cat-wifhat**.
+
+---
+
+## 2026-07-02 — Duplicate posts from a skipped state-commit
+
+**Symptom:** two 虛詞 articles (Jamie Vardy, Granta) were published twice
+(06-29 and again 07-02).
+
+**Cause:** the 06-29 creation run published the 2 immediate articles fine, but a
+later article's fetch hit a network error → the bot returned exit 1 → the
+workflow's `Commit updated state` step (no `if:`) was **skipped**. So the state
+cursor never advanced (and the queue writes weren't committed). The next
+creation run (07-02) re-saw those articles as new and re-published them. The
+creation path has no dedup (unlike the drip path), so lost state = duplicates.
+
+**Fix:** the commit steps now run with `if: ${{ always() }}` in all three
+workflows, so successfully-published progress (state advances only per success)
+is persisted even when a later article fails. User manually deleted the dup
+copies.
 
 ---
 

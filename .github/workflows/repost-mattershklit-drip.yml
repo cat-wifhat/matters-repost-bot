@@ -45,6 +45,9 @@ jobs:
           python -m bot.main $ARGS
 
       - name: Commit updated queue
+        # Run even if the publish step failed, so the queue reflects what was
+        # actually published (dedup also guards, but persist progress anyway).
+        if: ${{ always() }}
         run: |
           QUEUE="${STATE_FILE%.json}_queue.json"
           git add "$QUEUE" 2>/dev/null || true

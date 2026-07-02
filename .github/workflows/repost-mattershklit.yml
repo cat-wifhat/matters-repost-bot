@@ -60,6 +60,10 @@ jobs:
           python -m bot.main $ARGS
 
       - name: Commit updated state
+        # Run even if the bot step failed: state/queue only advance per
+        # successfully-published article, so committing partial progress is
+        # correct and prevents re-publishing (duplicates) on the next run.
+        if: ${{ always() }}
         run: |
           # State cursor + the publish queue (created by the drip schedule).
           git add "$STATE_FILE" "${STATE_FILE%.json}_queue.json" 2>/dev/null || git add "$STATE_FILE"

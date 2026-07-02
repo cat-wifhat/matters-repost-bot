@@ -56,6 +56,9 @@ jobs:
           python -m bot.main $ARGS
 
       - name: Commit updated state
+        # Run even if the bot step failed: state only advances per successfully-
+        # published article, so committing partial progress prevents duplicates.
+        if: ${{ always() }}
         run: |
           if [ ! -f "$STATE_FILE" ]; then
             echo "$STATE_FILE was not produced; nothing to commit"
