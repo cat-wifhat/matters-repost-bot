@@ -22,10 +22,12 @@ cursor never advanced (and the queue writes weren't committed). The next
 creation run (07-02) re-saw those articles as new and re-published them. The
 creation path has no dedup (unlike the drip path), so lost state = duplicates.
 
-**Fix:** the commit steps now run with `if: ${{ always() }}` in all three
+**Fix:** (1) the commit steps now run with `if: ${{ always() }}` in all three
 workflows, so successfully-published progress (state advances only per success)
-is persisted even when a later article fails. User manually deleted the dup
-copies.
+is persisted even when a later article fails. (2) Last-line dedup: the creation
+run loads existing titles via `list_drafts` and **skips any article whose title
+is already on the account**, so even if state can't be persisted the same piece
+isn't published twice. User manually deleted the dup copies.
 
 ---
 

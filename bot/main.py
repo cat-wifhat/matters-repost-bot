@@ -252,6 +252,17 @@ def run(
         client = MattersClient()
         client.login(config.MATTERS_EMAIL, config.MATTERS_PASSWORD)
 
+    # Last-line dedup: titles already on the account (published or draft). If a
+    # prior run published an article but its state didn't persist (e.g. a failed
+    # run skipped the state commit), the title match here stops us re-publishing.
+    existing_titles: set[str] = set()
+    if client is not None:
+        try:
+            existing_titles = {d.get("title", "") for d in client.list_drafts(first=100)}
+            log.info("Loaded %d existing titles for dedup", len(existing_titles))
+        except MattersError as e:
+            log.warning("Could not load existing titles for dedup (continuing): %s", e)
+
     processed: list[dict] = []
     failures: list[dict] = []
     skipped: list[dict] = []
@@ -269,6 +280,18 @@ def run(
                 log.info("SKIP %s — %s: %s", ref.article_id, skip_reason, article.title)
                 skipped.append({"article_id": ref.article_id, "title": article.title,
                                 "url": ref.url, "reason": skip_reason})
+                if not dry_run:
+                    source.advance_state(state, article)
+                    save_state(state_path, state)
+                continue
+
+            # Dedup by title against what's already on the account (see above).
+            # Doesn't consume a publish slot; marks seen so it isn't re-checked.
+            if article.title in existing_titles:
+                log.info("SKIP %s — already on account (title match): %s",
+                         ref.article_id, article.title)
+                skipped.append({"article_id": ref.article_id, "title": article.title,
+                                "url": ref.url, "reason": "duplicate title on account"})
                 if not dry_run:
                     source.advance_state(state, article)
                     save_state(state_path, state)

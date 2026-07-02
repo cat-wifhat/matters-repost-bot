@@ -66,6 +66,12 @@ the `Source` abstraction.
 - **Skip third-party reposts (虛詞).** 虛詞 sometimes republishes pieces from
   other platforms, marked「授權轉載自」in the body; `repost_skip_reason` skips
   those (only 虛詞). We mirror first-party content only.
+- **Duplicate protection (two layers).** Workflow commit steps use
+  `if: always()` so a partial failure can't skip persisting state (state only
+  advances per successful article). And the creation run does a **title dedup**:
+  it loads existing titles via `list_drafts` and skips any article already on the
+  account — the last line of defence if state still can't be pushed. (Drip has
+  its own draft-state dedup.)
 - **Images are uploaded as bytes, not by URL.** We download each image with the
   *source's* session and push it to Matters via `singleFileUpload`. Matters'
   server-side image fetcher (`directImageUpload`) gets Cloudflare-blocked on
